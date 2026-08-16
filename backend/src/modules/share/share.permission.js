@@ -1,5 +1,5 @@
 import prisma from "../../config/prisma.js";
-
+import { AppError } from "../../utils/AppError.js";
 // ==================== PERMISSION CONSTANTS ====================
 
 export const PERMISSION = {
@@ -246,4 +246,57 @@ export async function getFilePermission({
     permission,
     folderPermission
   );
+}
+
+
+// ==================== REQUIRE FILE PERMISSION ====================
+
+export async function requireFilePermission({
+  fileId,
+  userId,
+  minimum = PERMISSION.VIEWER,
+}) {
+  const permission =
+    await getFilePermission({
+      fileId,
+      userId,
+    });
+
+  if (
+    permissionRank[permission] <
+    permissionRank[minimum]
+  ) {
+    throw new AppError(
+      "You do not have permission to access this file",
+      403
+    );
+  }
+
+  return permission;
+}
+
+// ==================== REQUIRE FOLDER PERMISSION ====================
+
+export async function requireFolderPermission({
+  folderId,
+  userId,
+  minimum = PERMISSION.VIEWER,
+}) {
+  const permission =
+    await getFolderPermission({
+      folderId,
+      userId,
+    });
+
+  if (
+    permissionRank[permission] <
+    permissionRank[minimum]
+  ) {
+    throw new AppError(
+      "You do not have permission to access this folder",
+      403
+    );
+  }
+
+  return permission;
 }

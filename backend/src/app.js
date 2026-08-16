@@ -3,7 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
-
+import shareRoutes from "./modules/share/share.routes.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import fileRoutes from "./modules/file/file.routes.js";
 import { globalLimiter } from "./middlewares/rateLimit.middleware.js";
@@ -50,6 +50,7 @@ app.use("/api/v1/folders", folderRoutes);
 app.use("/api/v1/files", fileRoutes);
 app.use("/api/v1/trash",trashRoutes);
 app.use("/api/v1/dashboard",dashboardRoutes);
+app.use("/api/v1/shares",shareRoutes);
 // ==================== 404 HANDLER ====================
 app.use(notFound);
 // ==================== GLOBAL ERROR HANDLER ====================
