@@ -206,7 +206,5 @@ export async function startStorageDeletionWorker() {
     }
   );
 
-  console.log(
-    "Storage deletion worker started ✅"
-  );
+  
 }

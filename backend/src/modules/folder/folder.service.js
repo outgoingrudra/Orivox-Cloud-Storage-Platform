@@ -18,6 +18,10 @@ import {
   requireFolderPermission,
   PERMISSION,
 } from "../share/share.permission.js";
+import {
+  publishStorageDeletion,
+} from "../file/file.publisher.js";
+
 
 export const createFolder = async ({
   name,
@@ -494,12 +498,11 @@ async function collectFolderSubtree({
   return folderIds;
 }
 
-
 export async function permanentlyDeleteFolder({
   folderId,
   userId,
 }) {
-  // ==================== OWNER PERMISSION ====================
+  // ==================== OWNER ONLY ====================
 
   await requireFolderPermission({
     folderId,
@@ -527,7 +530,7 @@ export async function permanentlyDeleteFolder({
     );
   }
 
-  // ==================== COLLECT ENTIRE SUBTREE ====================
+  // ==================== COLLECT SUBTREE ====================
 
   const folderIds =
     await collectFolderSubtree({
@@ -535,7 +538,7 @@ export async function permanentlyDeleteFolder({
       userId,
     });
 
-  // ==================== GET ALL FILES ====================
+  // ==================== FIND ALL FILES ====================
 
   const files =
     await prisma.file.findMany({
@@ -549,62 +552,11 @@ export async function permanentlyDeleteFolder({
 
       select: {
         id: true,
+        userId: true,
         objectKey: true,
         size: true,
       },
     });
-
-  // ==================== DELETE B2 OBJECTS ====================
-
-  if (files.length > 0) {
-    const objects =
-      files.map((file) => ({
-        Key: file.objectKey,
-      }));
-
-    /*
-      S3-compatible DeleteObjects allows
-      max 1000 objects per request.
-    */
-
-    for (
-      let i = 0;
-      i < objects.length;
-      i += 1000
-    ) {
-      const batch =
-        objects.slice(
-          i,
-          i + 1000
-        );
-
-      try {
-        await storageClient.send(
-          new DeleteObjectsCommand({
-            Bucket:
-              STORAGE_BUCKET,
-
-            Delete: {
-              Objects: batch,
-              Quiet: true,
-            },
-          })
-        );
-      } catch (error) {
-        console.error(
-          "Failed to delete folder objects from B2:",
-          error
-        );
-
-        throw new AppError(
-          "Unable to delete folder files from storage",
-          502
-        );
-      }
-    }
-  }
-
-  // ==================== CALCULATE RELEASED STORAGE ====================
 
   const totalSize =
     files.reduce(
@@ -613,73 +565,186 @@ export async function permanentlyDeleteFolder({
       0n
     );
 
-  // ==================== DATABASE CLEANUP ====================
+  // ==================== DATABASE TRANSACTION ====================
 
-  await prisma.$transaction(
-    async (tx) => {
-      /*
-        Delete files first.
+  const deletionJobs =
+    await prisma.$transaction(
+      async (tx) => {
+        /*
+          IMPORTANT:
 
-        Their folderId references folders
-        inside the subtree.
-      */
+          Don't delete folder hierarchy while
+          an upload is actively targeting one
+          of these folders.
 
-      await tx.file.deleteMany({
-        where: {
-          userId,
+          That upload may currently be going
+          through initiate → B2 → confirm.
+        */
+        const activeUploads =
+          await tx.uploadReservation.count({
+            where: {
+              folderId: {
+                in: folderIds,
+              },
 
-          folderId: {
-            in: folderIds,
-          },
-        },
-      });
+              status: "PENDING",
+            },
+          });
 
-      /*
-        Delete folders bottom-up.
+        if (activeUploads > 0) {
+          throw new AppError(
+            "Folder has active uploads. Cancel them or wait for them to expire before permanent deletion.",
+            409
+          );
+        }
 
-        Example:
+        /*
+          Completed / cancelled / expired
+          reservation records can now be removed.
 
-        A
-        └── B
-            └── C
-
-        Delete:
-        C → B → A
-
-        because our parent relation uses
-        onDelete: Restrict.
-      */
-
-      for (
-        let i =
-          folderIds.length - 1;
-        i >= 0;
-        i--
-      ) {
-        await tx.folder.delete({
+          This is also necessary because
+          UploadReservation.folder uses
+          onDelete: Restrict.
+        */
+        await tx.uploadReservation.deleteMany({
           where: {
-            id: folderIds[i],
-          },
-        });
-      }
-
-      // Update user's consumed storage
-      if (totalSize > 0n) {
-        await tx.user.update({
-          where: {
-            id: userId,
-          },
-
-          data: {
-            storageUsed: {
-              decrement:
-                totalSize,
+            folderId: {
+              in: folderIds,
             },
           },
         });
+
+        // ==================== CREATE DELETION JOBS ====================
+
+        const jobs = [];
+
+        /*
+          One physical B2 object
+          = one durable deletion job.
+        */
+        for (const file of files) {
+          const job =
+            await tx.storageDeletionJob.create({
+              data: {
+                userId:
+                  file.userId,
+
+                fileId:
+                  file.id,
+
+                objectKey:
+                  file.objectKey,
+
+                size:
+                  file.size,
+
+                status:
+                  "PENDING",
+              },
+
+              select: {
+                id: true,
+              },
+            });
+
+          jobs.push(job);
+        }
+
+        // ==================== DELETE FILE METADATA ====================
+
+        await tx.file.deleteMany({
+          where: {
+            userId,
+
+            folderId: {
+              in: folderIds,
+            },
+          },
+        });
+
+        // ==================== DELETE FOLDERS BOTTOM-UP ====================
+
+        /*
+          Example:
+
+          A
+          └── B
+              └── C
+
+          Because parent relation uses
+          onDelete: Restrict:
+
+          C → B → A
+        */
+
+        for (
+          let i =
+            folderIds.length - 1;
+          i >= 0;
+          i--
+        ) {
+          await tx.folder.delete({
+            where: {
+              id: folderIds[i],
+            },
+          });
+        }
+
+        // ==================== RELEASE STORAGE ====================
+
+        if (totalSize > 0n) {
+          await tx.user.update({
+            where: {
+              id: userId,
+            },
+
+            data: {
+              storageUsed: {
+                decrement:
+                  totalSize,
+              },
+            },
+          });
+        }
+
+        return jobs;
       }
+    );
+
+  // ==================== PUBLISH DELETION JOBS ====================
+
+  /*
+    PostgreSQL transaction has committed.
+
+    Now ask RabbitMQ workers to physically
+    remove the objects from B2.
+  */
+
+  let publishedJobs = 0;
+
+  for (const job of deletionJobs) {
+    try {
+      publishStorageDeletion(
+        job.id
+      );
+
+      publishedJobs++;
+    } catch (error) {
+      /*
+        Not fatal.
+
+        Job remains PENDING in PostgreSQL.
+
+        storageDeletionRecovery.job.js
+        will republish it later.
+      */
+
+      console.error(
+        `Failed to publish storage deletion job ${job.id}:`,
+        error
+      );
     }
-  );
+  }
 
   return {
     deletedFolders:
@@ -690,5 +755,10 @@ export async function permanentlyDeleteFolder({
 
     releasedStorage:
       Number(totalSize),
+
+    deletionJobs:
+      deletionJobs.length,
+
+    publishedJobs,
   };
 }

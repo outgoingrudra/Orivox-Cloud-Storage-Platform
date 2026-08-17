@@ -60,5 +60,5 @@ export const startEmailWorker = async () => {
     }
   });
 
-  console.log("Email worker started");
+  
 };

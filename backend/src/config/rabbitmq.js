@@ -19,7 +19,7 @@ export const connectRabbitMQ = async () => {
     durable: true,
   });
 
-  console.log("RabbitMQ connected");
+  
 };
 
 export const getChannel = () => {
