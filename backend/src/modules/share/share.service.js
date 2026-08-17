@@ -757,3 +757,174 @@ export async function getPublicFileDownloadUrl(
     expiresIn: 300,
   };
 }
+
+
+async function isFolderInsideSharedTree({
+  candidateFolderId,
+  sharedRootFolderId,
+  ownerId,
+}) {
+  let currentId = candidateFolderId;
+
+  while (currentId) {
+    if (currentId === sharedRootFolderId) {
+      return true;
+    }
+
+    const folder = await prisma.folder.findFirst({
+      where: {
+        id: currentId,
+        userId: ownerId,
+      },
+
+      select: {
+        parentId: true,
+      },
+    });
+
+    if (!folder) {
+      return false;
+    }
+
+    currentId = folder.parentId;
+  }
+
+  return false;
+}
+
+export async function getPublicFolderContents({
+  token,
+  folderId,
+}) {
+  const share =
+    await resolveFolderShareLink(token);
+
+  const sharedRoot =
+    share.folder;
+
+  const targetFolderId =
+    folderId || sharedRoot.id;
+
+  const allowed =
+    await isFolderInsideSharedTree({
+      candidateFolderId:
+        targetFolderId,
+
+      sharedRootFolderId:
+        sharedRoot.id,
+
+      ownerId:
+        sharedRoot.userId,
+    });
+
+  if (!allowed) {
+    throw new AppError(
+      "Folder is outside the shared resource",
+      403
+    );
+  }
+
+  const targetFolder =
+    await prisma.folder.findFirst({
+      where: {
+        id:
+          targetFolderId,
+
+        userId:
+          sharedRoot.userId,
+
+        isTrashed:
+          false,
+      },
+
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+      },
+    });
+
+  if (!targetFolder) {
+    throw new AppError(
+      "Folder not found",
+      404
+    );
+  }
+
+  const [folders, files] =
+    await prisma.$transaction([
+      prisma.folder.findMany({
+        where: {
+          userId:
+            sharedRoot.userId,
+
+          parentId:
+            targetFolderId,
+
+          isTrashed:
+            false,
+        },
+
+        orderBy: {
+          name: "asc",
+        },
+
+        select: {
+          id: true,
+          name: true,
+          parentId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+
+      prisma.file.findMany({
+        where: {
+          userId:
+            sharedRoot.userId,
+
+          folderId:
+            targetFolderId,
+
+          isTrashed:
+            false,
+        },
+
+        orderBy: {
+          name: "asc",
+        },
+
+        select: {
+          id: true,
+          name: true,
+          mimeType: true,
+          size: true,
+          folderId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
+
+  return {
+    sharedRoot: {
+      id:
+        sharedRoot.id,
+
+      name:
+        sharedRoot.name,
+    },
+
+    currentFolder:
+      targetFolder,
+
+    folders,
+
+    files:
+      files.map((file) => ({
+        ...file,
+        size:
+          Number(file.size),
+      })),
+  };
+}

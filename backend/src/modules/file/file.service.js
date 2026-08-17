@@ -917,3 +917,100 @@ export async function permanentlyDeleteFile({ fileId, userId }) {
 
   return true;
 }
+
+
+// ==================== GLOBAL EXPIRED RESERVATION CLEANUP ====================
+
+export async function cleanupAllExpiredReservations() {
+  const expiredReservations =
+    await prisma.uploadReservation.findMany({
+      where: {
+        status: "PENDING",
+
+        expiresAt: {
+          lt: new Date(),
+        },
+      },
+
+      select: {
+        id: true,
+        ownerId: true,
+        size: true,
+        objectKey: true,
+      },
+
+      // Don't process unlimited rows in one run
+      take: 100,
+    });
+
+  let cleaned = 0;
+
+  for (const reservation of expiredReservations) {
+    const released =
+      await prisma.$transaction(async (tx) => {
+        /*
+          Atomically claim this reservation.
+
+          If another server/worker already processed it,
+          updated.count will be 0.
+        */
+        const updated =
+          await tx.uploadReservation.updateMany({
+            where: {
+              id: reservation.id,
+              status: "PENDING",
+            },
+
+            data: {
+              status: "EXPIRED",
+            },
+          });
+
+        if (updated.count !== 1) {
+          return false;
+        }
+
+        await tx.user.update({
+          where: {
+            id: reservation.ownerId,
+          },
+
+          data: {
+            storageReserved: {
+              decrement: reservation.size,
+            },
+          },
+        });
+
+        return true;
+      });
+
+    if (!released) {
+      continue;
+    }
+
+    /*
+      The file may already have reached B2,
+      but /confirm was never called.
+
+      Delete possible orphan object.
+    */
+    try {
+      await storageClient.send(
+        new DeleteObjectCommand({
+          Bucket: STORAGE_BUCKET,
+          Key: reservation.objectKey,
+        })
+      );
+    } catch (error) {
+      console.error(
+        `Failed deleting expired upload object ${reservation.objectKey}:`,
+        error
+      );
+    }
+
+    cleaned++;
+  }
+
+  return cleaned;
+}

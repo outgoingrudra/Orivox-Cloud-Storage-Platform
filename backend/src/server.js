@@ -14,7 +14,7 @@ const PORT = process.env.PORT || 5000;
 
 let server;
 
-const startServer = async () => {
+async function startServer() {
   try {
     await prisma.$connect();
     console.log("PostgreSQL connected successfully ✅");
@@ -28,33 +28,52 @@ const startServer = async () => {
   } catch (error) {
     console.error("Server startup failed:", error);
 
+    try {
+      await closeRabbitMQ();
+    } catch {}
+
     await prisma.$disconnect();
 
     process.exit(1);
   }
-};
+}
 
-const shutdown = async (signal) => {
+async function shutdown(signal) {
   console.log(`${signal} received. Shutting down...`);
 
-  if (server) {
-    server.close(async () => {
-      try {
-        await closeRabbitMQ();
-        await prisma.$disconnect();
+  try {
+    if (server) {
+      await new Promise((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
 
-        console.log("Shutdown complete ✅");
+          resolve();
+        });
+      });
+    }
 
-        process.exit(0);
-      } catch (error) {
-        console.error("Shutdown error:", error);
-        process.exit(1);
-      }
-    });
+    await closeRabbitMQ();
+    await prisma.$disconnect();
+
+    console.log("Shutdown complete ✅");
+
+    process.exit(0);
+  } catch (error) {
+    console.error("Shutdown error:", error);
+
+    process.exit(1);
   }
-};
+}
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => {
+  shutdown("SIGTERM");
+});
+
+process.on("SIGINT", () => {
+  shutdown("SIGINT");
+});
 
 startServer();
