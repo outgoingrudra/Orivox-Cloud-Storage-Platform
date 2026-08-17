@@ -21,9 +21,7 @@ import {
   PERMISSION,
 } from "../share/share.permission.js";
 import { publishStorageDeletion } from "./file.publisher.js";
-import {
-  getValidRestoreParent,
-} from "../folder/folder.helper.js";
+import { getValidRestoreParent } from "../folder/folder.helper.js";
 
 import { AppError } from "../../utils/AppError.js";
 
@@ -32,102 +30,94 @@ const UPLOAD_EXPIRY_MS = 15 * 60 * 1000;
 const PRESIGNED_URL_EXPIRY_SECONDS = 15 * 60;
 
 export async function cleanupExpiredReservations(ownerId) {
-  const expired =
-    await prisma.uploadReservation.findMany({
-      where: {
-        ownerId,
-        status: "PENDING",
+  const expired = await prisma.uploadReservation.findMany({
+    where: {
+      ownerId,
+      status: "PENDING",
 
-        expiresAt: {
-          lt: new Date(),
-        },
+      expiresAt: {
+        lt: new Date(),
       },
+    },
 
-      select: {
-        id: true,
-        size: true,
-        objectKey: true,
-        ownerId: true,
-      },
-    });
+    select: {
+      id: true,
+      size: true,
+      objectKey: true,
+      ownerId: true,
+    },
+  });
 
   for (const reservation of expired) {
-    const deletionJob =
-      await prisma.$transaction(async (tx) => {
-        /*
+    const deletionJob = await prisma.$transaction(async (tx) => {
+      /*
           Atomically claim reservation.
 
           Only one process can change:
           PENDING → EXPIRED
         */
-        const updated =
-          await tx.uploadReservation.updateMany({
-            where: {
-              id: reservation.id,
-              ownerId: reservation.ownerId,
-              status: "PENDING",
-            },
+      const updated = await tx.uploadReservation.updateMany({
+        where: {
+          id: reservation.id,
+          ownerId: reservation.ownerId,
+          status: "PENDING",
+        },
 
-            data: {
-              status: "EXPIRED",
-            },
-          });
+        data: {
+          status: "EXPIRED",
+        },
+      });
 
-        if (updated.count !== 1) {
-          return null;
-        }
+      if (updated.count !== 1) {
+        return null;
+      }
 
-        // Release reserved quota
-        await tx.user.update({
-          where: {
-            id: reservation.ownerId,
+      // Release reserved quota
+      await tx.user.update({
+        where: {
+          id: reservation.ownerId,
+        },
+
+        data: {
+          storageReserved: {
+            decrement: reservation.size,
           },
+        },
+      });
 
-          data: {
-            storageReserved: {
-              decrement: reservation.size,
-            },
-          },
-        });
-
-        /*
+      /*
           The object may or may not exist in B2.
 
           That's okay — deletion worker handles
           deleting this object idempotently.
         */
-        const job =
-          await tx.storageDeletionJob.create({
-            data: {
-              userId: reservation.ownerId,
+      const job = await tx.storageDeletionJob.create({
+        data: {
+          userId: reservation.ownerId,
 
-              fileId: null,
+          fileId: null,
 
-              objectKey:
-                reservation.objectKey,
+          objectKey: reservation.objectKey,
 
-              size:
-                reservation.size,
+          size: reservation.size,
 
-              status: "PENDING",
-            },
+          status: "PENDING",
+        },
 
-            select: {
-              id: true,
-            },
-          });
-
-        return job;
+        select: {
+          id: true,
+        },
       });
+
+      return job;
+    });
 
     if (!deletionJob) {
       continue;
     }
 
     try {
-      publishStorageDeletion(
-        deletionJob.id
-      );
+      publishStorageDeletion(deletionJob.id);
     } catch (error) {
       /*
         Don't worry if RabbitMQ publish fails.
@@ -137,7 +127,7 @@ export async function cleanupExpiredReservations(ownerId) {
       */
       console.error(
         `Failed to publish expired-upload deletion job ${deletionJob.id}:`,
-        error
+        error,
       );
     }
   }
@@ -298,111 +288,90 @@ export async function initiateUpload({
   };
 }
 
-export async function cancelUpload({
-  userId,
-  reservationId,
-}) {
-  const result =
-    await prisma.$transaction(async (tx) => {
-      const current =
-        await tx.uploadReservation.findFirst({
-          where: {
-            id: reservationId,
+export async function cancelUpload({ userId, reservationId }) {
+  const result = await prisma.$transaction(async (tx) => {
+    const current = await tx.uploadReservation.findFirst({
+      where: {
+        id: reservationId,
 
-            initiatedById: userId,
+        initiatedById: userId,
 
-            status: "PENDING",
-          },
-        });
-
-      if (!current) {
-        throw new AppError(
-          "Active upload reservation not found",
-          404
-        );
-      }
-
-      // ==================== CLAIM RESERVATION ====================
-
-      const updated =
-        await tx.uploadReservation.updateMany({
-          where: {
-            id: current.id,
-
-            initiatedById: userId,
-
-            status: "PENDING",
-          },
-
-          data: {
-            status: "CANCELLED",
-          },
-        });
-
-      if (updated.count !== 1) {
-        throw new AppError(
-          "Upload reservation already processed",
-          409
-        );
-      }
-
-      // ==================== RELEASE QUOTA ====================
-
-      await tx.user.update({
-        where: {
-          id: current.ownerId,
-        },
-
-        data: {
-          storageReserved: {
-            decrement:
-              current.size,
-          },
-        },
-      });
-
-      // ==================== DELETION JOB ====================
-
-      const deletionJob =
-        await tx.storageDeletionJob.create({
-          data: {
-            userId:
-              current.ownerId,
-
-            fileId:
-              null,
-
-            objectKey:
-              current.objectKey,
-
-            size:
-              current.size,
-
-            status:
-              "PENDING",
-          },
-
-          select: {
-            id: true,
-          },
-        });
-
-      return {
-        reservation: current,
-        deletionJob,
-      };
+        status: "PENDING",
+      },
     });
+
+    if (!current) {
+      throw new AppError("Active upload reservation not found", 404);
+    }
+
+    // ==================== CLAIM RESERVATION ====================
+
+    const updated = await tx.uploadReservation.updateMany({
+      where: {
+        id: current.id,
+
+        initiatedById: userId,
+
+        status: "PENDING",
+      },
+
+      data: {
+        status: "CANCELLED",
+      },
+    });
+
+    if (updated.count !== 1) {
+      throw new AppError("Upload reservation already processed", 409);
+    }
+
+    // ==================== RELEASE QUOTA ====================
+
+    await tx.user.update({
+      where: {
+        id: current.ownerId,
+      },
+
+      data: {
+        storageReserved: {
+          decrement: current.size,
+        },
+      },
+    });
+
+    // ==================== DELETION JOB ====================
+
+    const deletionJob = await tx.storageDeletionJob.create({
+      data: {
+        userId: current.ownerId,
+
+        fileId: null,
+
+        objectKey: current.objectKey,
+
+        size: current.size,
+
+        status: "PENDING",
+      },
+
+      select: {
+        id: true,
+      },
+    });
+
+    return {
+      reservation: current,
+      deletionJob,
+    };
+  });
 
   // ==================== PUBLISH ====================
 
   try {
-    publishStorageDeletion(
-      result.deletionJob.id
-    );
+    publishStorageDeletion(result.deletionJob.id);
   } catch (error) {
     console.error(
       `Failed to publish cancelled-upload deletion job ${result.deletionJob.id}:`,
-      error
+      error,
     );
   }
 
@@ -587,22 +556,18 @@ export async function listFiles({
       minimum: PERMISSION.VIEWER,
     });
 
-    const folder =
-      await prisma.folder.findUnique({
-        where: {
-          id: folderId,
-        },
+    const folder = await prisma.folder.findUnique({
+      where: {
+        id: folderId,
+      },
 
-        select: {
-          userId: true,
-        },
-      });
+      select: {
+        userId: true,
+      },
+    });
 
     if (!folder) {
-      throw new AppError(
-        "Folder not found",
-        404
-      );
+      throw new AppError("Folder not found", 404);
     }
 
     /*
@@ -610,28 +575,21 @@ export async function listFiles({
       shared folder, query resources belonging
       to that folder's owner.
     */
-    resourceOwnerId =
-      folder.userId;
+    resourceOwnerId = folder.userId;
   }
 
   // ==================== MIME FILTER ====================
 
-  const mimeFilter =
-    type
-      ? getMimeFilter(type)
-      : {};
+  const mimeFilter = type ? getMimeFilter(type) : {};
 
   // ==================== QUERY ====================
 
   const where = {
-    userId:
-      resourceOwnerId,
+    userId: resourceOwnerId,
 
-    isTrashed:
-      false,
+    isTrashed: false,
 
-    folderId:
-      folderId || null,
+    folderId: folderId || null,
 
     ...(search
       ? {
@@ -645,61 +603,51 @@ export async function listFiles({
     ...mimeFilter,
   };
 
-  const skip =
-    (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
-  const [files, total] =
-    await prisma.$transaction([
-      prisma.file.findMany({
-        where,
+  const [files, total] = await prisma.$transaction([
+    prisma.file.findMany({
+      where,
 
-        skip,
-        take: limit,
+      skip,
+      take: limit,
 
-        orderBy: {
-          [sortBy]: order,
-        },
+      orderBy: {
+        [sortBy]: order,
+      },
 
-        select: {
-          id: true,
-          name: true,
-          mimeType: true,
-          size: true,
-          folderId: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      }),
+      select: {
+        id: true,
+        name: true,
+        mimeType: true,
+        size: true,
+        folderId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
 
-      prisma.file.count({
-        where,
-      }),
-    ]);
+    prisma.file.count({
+      where,
+    }),
+  ]);
 
   return {
-    files: files.map(
-      (file) => ({
-        ...file,
-        size:
-          Number(file.size),
-      })
-    ),
+    files: files.map((file) => ({
+      ...file,
+      size: Number(file.size),
+    })),
 
     pagination: {
       page,
       limit,
       total,
 
-      totalPages:
-        Math.ceil(
-          total / limit
-        ),
+      totalPages: Math.ceil(total / limit),
 
-      hasNextPage:
-        page * limit < total,
+      hasNextPage: page * limit < total,
 
-      hasPreviousPage:
-        page > 1,
+      hasPreviousPage: page > 1,
     },
   };
 }
@@ -901,10 +849,7 @@ export async function trashFile({ fileId, userId }) {
 
   return file;
 }
-export async function restoreFile({
-  fileId,
-  userId,
-}) {
+export async function restoreFile({ fileId, userId }) {
   await requireFilePermission({
     fileId,
     userId,
@@ -912,65 +857,55 @@ export async function restoreFile({
     allowTrashed: true,
   });
 
-  const file =
-    await prisma.file.findUnique({
-      where: {
-        id: fileId,
-      },
-    });
+  const file = await prisma.file.findUnique({
+    where: {
+      id: fileId,
+    },
+  });
 
   if (!file) {
-    throw new AppError(
-      "File not found",
-      404
-    );
+    throw new AppError("File not found", 404);
   }
 
   if (!file.isTrashed) {
-    throw new AppError(
-      "File is not in trash",
-      400
-    );
+    throw new AppError("File is not in trash", 400);
   }
 
   // Check the entire folder ancestor chain.
   //
   // If original folder or ANY ancestor is
   // unavailable/trashed, restore file to root.
-  const folderId =
-    await getValidRestoreParent({
-      parentId: file.folderId,
-      userId,
-    });
+  const folderId = await getValidRestoreParent({
+    parentId: file.folderId,
+    userId,
+  });
 
-  const restored =
-    await prisma.file.update({
-      where: {
-        id: fileId,
-      },
+  const restored = await prisma.file.update({
+    where: {
+      id: fileId,
+    },
 
-      data: {
-        isTrashed: false,
-        trashedAt: null,
-        folderId,
-      },
+    data: {
+      isTrashed: false,
+      trashedAt: null,
+      folderId,
+    },
 
-      select: {
-        id: true,
-        name: true,
-        mimeType: true,
-        size: true,
-        folderId: true,
-        isTrashed: true,
-      },
-    });
+    select: {
+      id: true,
+      name: true,
+      mimeType: true,
+      size: true,
+      folderId: true,
+      isTrashed: true,
+    },
+  });
 
   return {
     ...restored,
     size: Number(restored.size),
   };
 }
-
 
 export async function permanentlyDeleteFile({ fileId, userId }) {
   // ==================== OWNER PERMISSION ====================
@@ -1106,89 +1041,80 @@ export async function permanentlyDeleteFile({ fileId, userId }) {
 
 // ==================== GLOBAL EXPIRED RESERVATION CLEANUP ====================
 export async function cleanupAllExpiredReservations() {
-  const expiredReservations =
-    await prisma.uploadReservation.findMany({
-      where: {
-        status: "PENDING",
+  const expiredReservations = await prisma.uploadReservation.findMany({
+    where: {
+      status: "PENDING",
 
-        expiresAt: {
-          lt: new Date(),
-        },
+      expiresAt: {
+        lt: new Date(),
       },
+    },
 
-      select: {
-        id: true,
-        ownerId: true,
-        size: true,
-        objectKey: true,
-      },
+    select: {
+      id: true,
+      ownerId: true,
+      size: true,
+      objectKey: true,
+    },
 
-      take: 100,
-    });
+    take: 100,
+  });
 
   let cleaned = 0;
 
   for (const reservation of expiredReservations) {
-    const deletionJob =
-      await prisma.$transaction(async (tx) => {
-        // ==================== CLAIM RESERVATION ====================
+    const deletionJob = await prisma.$transaction(async (tx) => {
+      // ==================== CLAIM RESERVATION ====================
 
-        const updated =
-          await tx.uploadReservation.updateMany({
-            where: {
-              id: reservation.id,
-              status: "PENDING",
-            },
+      const updated = await tx.uploadReservation.updateMany({
+        where: {
+          id: reservation.id,
+          status: "PENDING",
+        },
 
-            data: {
-              status: "EXPIRED",
-            },
-          });
-
-        if (updated.count !== 1) {
-          return null;
-        }
-
-        // ==================== RELEASE QUOTA ====================
-
-        await tx.user.update({
-          where: {
-            id: reservation.ownerId,
-          },
-
-          data: {
-            storageReserved: {
-              decrement:
-                reservation.size,
-            },
-          },
-        });
-
-        // ==================== CREATE DELETION JOB ====================
-
-        return tx.storageDeletionJob.create({
-          data: {
-            userId:
-              reservation.ownerId,
-
-            fileId:
-              null,
-
-            objectKey:
-              reservation.objectKey,
-
-            size:
-              reservation.size,
-
-            status:
-              "PENDING",
-          },
-
-          select: {
-            id: true,
-          },
-        });
+        data: {
+          status: "EXPIRED",
+        },
       });
+
+      if (updated.count !== 1) {
+        return null;
+      }
+
+      // ==================== RELEASE QUOTA ====================
+
+      await tx.user.update({
+        where: {
+          id: reservation.ownerId,
+        },
+
+        data: {
+          storageReserved: {
+            decrement: reservation.size,
+          },
+        },
+      });
+
+      // ==================== CREATE DELETION JOB ====================
+
+      return tx.storageDeletionJob.create({
+        data: {
+          userId: reservation.ownerId,
+
+          fileId: null,
+
+          objectKey: reservation.objectKey,
+
+          size: reservation.size,
+
+          status: "PENDING",
+        },
+
+        select: {
+          id: true,
+        },
+      });
+    });
 
     if (!deletionJob) {
       continue;
@@ -1199,13 +1125,11 @@ export async function cleanupAllExpiredReservations() {
     // ==================== PUBLISH ====================
 
     try {
-      publishStorageDeletion(
-        deletionJob.id
-      );
+      publishStorageDeletion(deletionJob.id);
     } catch (error) {
       console.error(
         `Failed to publish expired-upload deletion job ${deletionJob.id}:`,
-        error
+        error,
       );
     }
   }

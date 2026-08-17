@@ -8,7 +8,8 @@ import {
   trashFolderController,
   restoreFolderController,
   listTrashController,
-  permanentlyDeleteFolderController
+  permanentlyDeleteFolderController,
+  getFolderDetailsController
 } from "./folder.controller.js";
 
 import {
@@ -73,5 +74,9 @@ router.patch(
 router.delete(
   "/:folderId",
   permanentlyDeleteFolderController
+);
+router.get(
+  "/:folderId",
+  getFolderDetailsController
 );
 export default router;

@@ -331,6 +331,8 @@ export async function revokeFolderShare({ shareId, ownerId }) {
 // ==================== SHARED WITH ME ====================
 
 export async function getSharedWithMe(userId) {
+  // ==================== FETCH DIRECT SHARES ====================
+
   const [fileShares, folderShares] = await prisma.$transaction([
     prisma.fileShare.findMany({
       where: {
@@ -409,24 +411,85 @@ export async function getSharedWithMe(userId) {
     }),
   ]);
 
-  return {
-    files: fileShares.map((share) => ({
+  // ==================== EFFECTIVELY ACCESSIBLE FILES ====================
+
+  const visibleFileShares = [];
+
+  for (const share of fileShares) {
+    const permission = await getFilePermission({
+      fileId: share.file.id,
+      userId,
+    });
+
+    /*
+      getFilePermission() checks:
+      - file itself isn't trashed
+      - folder isn't trashed
+      - no ancestor is trashed
+      - sharing permission still exists
+    */
+    if (permission === PERMISSION.NONE) {
+      continue;
+    }
+
+    visibleFileShares.push({
       shareId: share.id,
-      permission: share.permission,
+
+      /*
+        Use effective permission instead of only
+        the direct share value.
+
+        Example:
+        direct file VIEWER +
+        inherited folder EDITOR
+        => effective EDITOR
+      */
+      permission,
+
       sharedAt: share.createdAt,
 
       file: {
         ...share.file,
         size: Number(share.file.size),
       },
-    })),
+    });
+  }
 
-    folders: folderShares.map((share) => ({
+  // ==================== EFFECTIVELY ACCESSIBLE FOLDERS ====================
+
+  const visibleFolderShares = [];
+
+  for (const share of folderShares) {
+    const permission = await getFolderPermission({
+      folderId: share.folder.id,
+
+      userId,
+    });
+
+    /*
+      Also checks the complete ancestor chain.
+    */
+    if (permission === PERMISSION.NONE) {
+      continue;
+    }
+
+    visibleFolderShares.push({
       shareId: share.id,
-      permission: share.permission,
+
+      permission,
+
       sharedAt: share.createdAt,
+
       folder: share.folder,
-    })),
+    });
+  }
+
+  // ==================== RESPONSE ====================
+
+  return {
+    files: visibleFileShares,
+
+    folders: visibleFolderShares,
   };
 }
 
@@ -579,7 +642,6 @@ export async function createFolderShareLink({ folderId, userId, expiresAt }) {
     token,
   };
 }
-
 export async function resolveFileShareLink(token) {
   const tokenHash = hashShareToken(token);
 
@@ -592,6 +654,7 @@ export async function resolveFileShareLink(token) {
       file: {
         select: {
           id: true,
+          userId: true,
           name: true,
           mimeType: true,
           size: true,
@@ -605,10 +668,25 @@ export async function resolveFileShareLink(token) {
   if (
     !share ||
     share.revokedAt ||
-    share.file.isTrashed ||
     (share.expiresAt && share.expiresAt < new Date())
   ) {
     throw new AppError("Share link is invalid or expired", 404);
+  }
+
+  const ownerPermission = await getFilePermission({
+    fileId: share.file.id,
+    userId: share.file.userId,
+  });
+
+  /*
+    Because getFilePermission() is trash-aware,
+    OWNER here means:
+    - file exists
+    - file itself is not trashed
+    - none of its ancestors are trashed
+  */
+  if (ownerPermission !== PERMISSION.OWNER) {
+    throw new AppError("Shared file is no longer available", 404);
   }
 
   return share;
@@ -637,10 +715,18 @@ export async function resolveFolderShareLink(token) {
   if (
     !share ||
     share.revokedAt ||
-    share.folder.isTrashed ||
     (share.expiresAt && share.expiresAt < new Date())
   ) {
     throw new AppError("Share link is invalid or expired", 404);
+  }
+
+  const ownerPermission = await getFolderPermission({
+    folderId: share.folder.id,
+    userId: share.folder.userId,
+  });
+
+  if (ownerPermission !== PERMISSION.OWNER) {
+    throw new AppError("Shared folder is no longer available", 404);
   }
 
   return share;
@@ -718,46 +804,30 @@ export async function revokeFolderShareLink({ linkId, userId }) {
   });
 }
 
+export async function getPublicFileDownloadUrl(token) {
+  const share = await resolveFileShareLink(token);
 
-export async function getPublicFileDownloadUrl(
-  token
-) {
-  const share =
-    await resolveFileShareLink(token);
+  const command = new GetObjectCommand({
+    Bucket: STORAGE_BUCKET,
 
-  const command =
-    new GetObjectCommand({
-      Bucket:
-        STORAGE_BUCKET,
+    Key: share.file.objectKey,
 
-      Key:
-        share.file.objectKey,
+    ResponseContentType: share.file.mimeType,
 
-      ResponseContentType:
-        share.file.mimeType,
+    ResponseContentDisposition: `attachment; filename="${encodeURIComponent(
+      share.file.name,
+    )}"`,
+  });
 
-      ResponseContentDisposition:
-        `attachment; filename="${encodeURIComponent(
-          share.file.name
-        )}"`,
-    });
-
-  const downloadUrl =
-    await getSignedUrl(
-      storageClient,
-      command,
-      {
-        expiresIn:
-          5 * 60,
-      }
-    );
+  const downloadUrl = await getSignedUrl(storageClient, command, {
+    expiresIn: 5 * 60,
+  });
 
   return {
     downloadUrl,
     expiresIn: 300,
   };
 }
-
 
 async function isFolderInsideSharedTree({
   candidateFolderId,
@@ -792,139 +862,200 @@ async function isFolderInsideSharedTree({
   return false;
 }
 
-export async function getPublicFolderContents({
-  token,
-  folderId,
-}) {
-  const share =
-    await resolveFolderShareLink(token);
+export async function getPublicFolderContents({ token, folderId }) {
+  const share = await resolveFolderShareLink(token);
 
-  const sharedRoot =
-    share.folder;
+  const sharedRoot = share.folder;
 
-  const targetFolderId =
-    folderId || sharedRoot.id;
+  const targetFolderId = folderId || sharedRoot.id;
 
-  const allowed =
-    await isFolderInsideSharedTree({
-      candidateFolderId:
-        targetFolderId,
+  const allowed = await isFolderInsideSharedTree({
+    candidateFolderId: targetFolderId,
 
-      sharedRootFolderId:
-        sharedRoot.id,
+    sharedRootFolderId: sharedRoot.id,
 
-      ownerId:
-        sharedRoot.userId,
-    });
+    ownerId: sharedRoot.userId,
+  });
 
   if (!allowed) {
-    throw new AppError(
-      "Folder is outside the shared resource",
-      403
-    );
+    throw new AppError("Folder is outside the shared resource", 403);
   }
 
-  const targetFolder =
-    await prisma.folder.findFirst({
+  const targetFolder = await prisma.folder.findFirst({
+    where: {
+      id: targetFolderId,
+
+      userId: sharedRoot.userId,
+
+      isTrashed: false,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+    },
+  });
+
+  if (!targetFolder) {
+    throw new AppError("Folder not found", 404);
+  }
+
+  const [folders, files] = await prisma.$transaction([
+    prisma.folder.findMany({
       where: {
-        id:
-          targetFolderId,
+        userId: sharedRoot.userId,
 
-        userId:
-          sharedRoot.userId,
+        parentId: targetFolderId,
 
-        isTrashed:
-          false,
+        isTrashed: false,
+      },
+
+      orderBy: {
+        name: "asc",
       },
 
       select: {
         id: true,
         name: true,
         parentId: true,
+        createdAt: true,
+        updatedAt: true,
       },
-    });
+    }),
 
-  if (!targetFolder) {
-    throw new AppError(
-      "Folder not found",
-      404
-    );
-  }
+    prisma.file.findMany({
+      where: {
+        userId: sharedRoot.userId,
 
-  const [folders, files] =
-    await prisma.$transaction([
-      prisma.folder.findMany({
-        where: {
-          userId:
-            sharedRoot.userId,
+        folderId: targetFolderId,
 
-          parentId:
-            targetFolderId,
+        isTrashed: false,
+      },
 
-          isTrashed:
-            false,
-        },
+      orderBy: {
+        name: "asc",
+      },
 
-        orderBy: {
-          name: "asc",
-        },
-
-        select: {
-          id: true,
-          name: true,
-          parentId: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      }),
-
-      prisma.file.findMany({
-        where: {
-          userId:
-            sharedRoot.userId,
-
-          folderId:
-            targetFolderId,
-
-          isTrashed:
-            false,
-        },
-
-        orderBy: {
-          name: "asc",
-        },
-
-        select: {
-          id: true,
-          name: true,
-          mimeType: true,
-          size: true,
-          folderId: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      }),
-    ]);
+      select: {
+        id: true,
+        name: true,
+        mimeType: true,
+        size: true,
+        folderId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+  ]);
 
   return {
     sharedRoot: {
-      id:
-        sharedRoot.id,
+      id: sharedRoot.id,
 
-      name:
-        sharedRoot.name,
+      name: sharedRoot.name,
     },
 
-    currentFolder:
-      targetFolder,
+    currentFolder: targetFolder,
 
     folders,
 
-    files:
-      files.map((file) => ({
-        ...file,
-        size:
-          Number(file.size),
-      })),
+    files: files.map((file) => ({
+      ...file,
+      size: Number(file.size),
+    })),
+  };
+}
+
+export async function getPublicFolderFileDownloadUrl({ token, fileId }) {
+  // ==================== VALIDATE SHARE LINK ====================
+
+  const share = await resolveFolderShareLink(token);
+
+  const sharedRoot = share.folder;
+
+  // ==================== FIND FILE ====================
+
+  const file = await prisma.file.findFirst({
+    where: {
+      id: fileId,
+
+      // Must belong to same owner as shared tree
+      userId: sharedRoot.userId,
+
+      isTrashed: false,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      mimeType: true,
+      size: true,
+      objectKey: true,
+      folderId: true,
+    },
+  });
+
+  if (!file) {
+    throw new AppError("File not found", 404);
+  }
+
+  /*
+    A folder share only exposes files
+    contained somewhere under that shared root.
+
+    Root-level files obviously cannot belong
+    inside a shared folder.
+  */
+  if (!file.folderId) {
+    throw new AppError("File is outside the shared folder", 403);
+  }
+
+  // ==================== VERIFY SUBTREE ====================
+
+  const allowed = await isFolderInsideSharedTree({
+    candidateFolderId: file.folderId,
+
+    sharedRootFolderId: sharedRoot.id,
+
+    ownerId: sharedRoot.userId,
+  });
+
+  if (!allowed) {
+    throw new AppError("File is outside the shared folder", 403);
+  }
+
+  // ==================== DOWNLOAD URL ====================
+
+  const command = new GetObjectCommand({
+    Bucket: STORAGE_BUCKET,
+
+    Key: file.objectKey,
+
+    ResponseContentType: file.mimeType,
+
+    ResponseContentDisposition: `attachment; filename="${encodeURIComponent(
+      file.name,
+    )}"`,
+  });
+
+  const downloadUrl = await getSignedUrl(storageClient, command, {
+    expiresIn: 5 * 60,
+  });
+
+  return {
+    file: {
+      id: file.id,
+
+      name: file.name,
+
+      mimeType: file.mimeType,
+
+      size: Number(file.size),
+    },
+
+    downloadUrl,
+
+    expiresIn: 300,
   };
 }

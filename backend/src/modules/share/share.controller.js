@@ -16,7 +16,8 @@ import {
   resolveFileShareLink,
   resolveFolderShareLink,
   getPublicFileDownloadUrl,
-  getPublicFolderContents
+  getPublicFolderContents,
+  getPublicFolderFileDownloadUrl
 
 } from "./share.service.js";
 
@@ -357,6 +358,26 @@ export const publicFolderContentsController =asyncHandler(async (req, res) => {
 
         folderId:
           req.query.folderId,
+      });
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  });
+
+
+
+// ==================== PUBLIC FOLDER FILE DOWNLOAD ====================
+
+export const publicFolderFileDownloadController = asyncHandler(async (req, res) => {
+    const data =
+      await getPublicFolderFileDownloadUrl({
+        token:
+          req.params.token,
+
+        fileId:
+          req.params.fileId,
       });
 
     return res.status(200).json({

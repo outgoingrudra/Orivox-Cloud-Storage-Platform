@@ -13,7 +13,8 @@ import {
   trashFolder,
   restoreFolder,
   listTrashedFolders,
-  permanentlyDeleteFolder
+  permanentlyDeleteFolder,
+  getFolderDetails
 } from "./folder.service.js";
 
 import {
@@ -241,5 +242,22 @@ export const permanentlyDeleteFolderController = asyncHandler(async (req, res) =
       message:
         "Folder permanently deleted",
       data: result,
+    });
+  });
+
+
+export const getFolderDetailsController =asyncHandler(async (req, res) => {
+    const data =
+      await getFolderDetails({
+        folderId:
+          req.params.folderId,
+
+        userId:
+          req.user.id,
+      });
+
+    return res.status(200).json({
+      success: true,
+      data,
     });
   });

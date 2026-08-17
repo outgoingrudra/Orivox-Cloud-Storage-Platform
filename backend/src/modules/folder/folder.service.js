@@ -1,34 +1,19 @@
 import prisma from "../../config/prisma.js";
 import { AppError } from "../../utils/AppError.js";
 
-import {
-  findOwnedFolder,
-  getValidRestoreParent
-} from "./folder.helper.js";
+import { findOwnedFolder, getValidRestoreParent } from "./folder.helper.js";
 
-import {
-  DeleteObjectsCommand,
-} from "@aws-sdk/client-s3";
+import { DeleteObjectsCommand } from "@aws-sdk/client-s3";
 
-import {
-  storageClient,
-  STORAGE_BUCKET,
-} from "../../config/storage.js";
+import { storageClient, STORAGE_BUCKET } from "../../config/storage.js";
 
 import {
   requireFolderPermission,
   PERMISSION,
 } from "../share/share.permission.js";
-import {
-  publishStorageDeletion,
-} from "../file/file.publisher.js";
+import { publishStorageDeletion } from "../file/file.publisher.js";
 
-
-export async function createFolder({
-  name,
-  parentId,
-  userId,
-}) {
+export async function createFolder({ name, parentId, userId }) {
   // Root folder belongs to the current user by default
   let ownerId = userId;
 
@@ -42,23 +27,19 @@ export async function createFolder({
       minimum: PERMISSION.EDITOR,
     });
 
-    const parentFolder =
-      await prisma.folder.findUnique({
-        where: {
-          id: parentId,
-        },
+    const parentFolder = await prisma.folder.findUnique({
+      where: {
+        id: parentId,
+      },
 
-        select: {
-          id: true,
-          userId: true,
-        },
-      });
+      select: {
+        id: true,
+        userId: true,
+      },
+    });
 
     if (!parentFolder) {
-      throw new AppError(
-        "Parent folder not found",
-        404
-      );
+      throw new AppError("Parent folder not found", 404);
     }
 
     /*
@@ -82,26 +63,24 @@ export async function createFolder({
 
   // ==================== CREATE ====================
 
-  const folder =
-    await prisma.folder.create({
-      data: {
-        name,
+  const folder = await prisma.folder.create({
+    data: {
+      name,
 
-        userId: ownerId,
+      userId: ownerId,
 
-        parentId:
-          parentId || null,
-      },
+      parentId: parentId || null,
+    },
 
-      select: {
-        id: true,
-        name: true,
-        parentId: true,
-        isTrashed: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    select: {
+      id: true,
+      name: true,
+      parentId: true,
+      isTrashed: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
 
   return folder;
 }
@@ -136,10 +115,7 @@ export async function listFolders({
     });
 
     if (!parentFolder) {
-      throw new AppError(
-        "Parent folder not found",
-        404
-      );
+      throw new AppError("Parent folder not found", 404);
     }
 
     resourceOwnerId = parentFolder.userId;
@@ -222,11 +198,7 @@ export async function listFolders({
   };
 }
 
-export async function renameFolder({
-  folderId,
-  userId,
-  name,
-}) {
+export async function renameFolder({ folderId, userId, name }) {
   await requireFolderPermission({
     folderId,
     userId,
@@ -251,18 +223,16 @@ export async function renameFolder({
   });
 }
 
+export async function moveFolder({ folderId, userId, parentId }) {
+  // ==================== SOURCE PERMISSION ====================
 
-export async function moveFolder({
-  folderId,
-  userId,
-  parentId,
-}) {
-  const permission =
-    await requireFolderPermission({
-      folderId,
-      userId,
-      minimum: PERMISSION.EDITOR,
-    });
+  const permission = await requireFolderPermission({
+    folderId,
+    userId,
+    minimum: PERMISSION.EDITOR,
+  });
+
+  // ==================== SOURCE FOLDER ====================
 
   const folder = await prisma.folder.findUnique({
     where: {
@@ -271,25 +241,27 @@ export async function moveFolder({
   });
 
   if (!folder) {
-    throw new AppError(
-      "Folder not found",
-      404
-    );
+    throw new AppError("Folder not found", 404);
   }
+
+  // ==================== SELF MOVE CHECK ====================
 
   if (folderId === parentId) {
-    throw new AppError(
-      "A folder cannot be moved inside itself",
-      400
-    );
+    throw new AppError("A folder cannot be moved inside itself", 400);
   }
 
+  // ==================== MOVE TO ROOT ====================
+
   if (!parentId) {
+    /*
+      Only the actual owner can move a folder
+      to their root.
+
+      An EDITOR of somebody else's shared folder
+      cannot move that folder into their own root.
+    */
     if (permission !== PERMISSION.OWNER) {
-      throw new AppError(
-        "Shared folders cannot be moved to your root",
-        403
-      );
+      throw new AppError("Shared folders cannot be moved to your root", 403);
     }
 
     return prisma.folder.update({
@@ -303,42 +275,95 @@ export async function moveFolder({
     });
   }
 
+  // ==================== DESTINATION PERMISSION ====================
+
   await requireFolderPermission({
     folderId: parentId,
     userId,
     minimum: PERMISSION.EDITOR,
   });
 
+  // ==================== DESTINATION FOLDER ====================
+
+  const destination = await prisma.folder.findUnique({
+    where: {
+      id: parentId,
+    },
+
+    select: {
+      id: true,
+      userId: true,
+    },
+  });
+
+  if (!destination) {
+    throw new AppError("Destination folder not found", 404);
+  }
+
+  // ==================== OWNER CONSISTENCY ====================
+
+  /*
+    Folder trees must never cross owners.
+
+    Example:
+
+    Alice owns A
+    Bob owns B
+
+    A cannot be moved inside B even if the
+    current user has EDITOR permission on both.
+
+    This keeps permission inheritance and
+    storage ownership consistent.
+  */
+  if (folder.userId !== destination.userId) {
+    throw new AppError(
+      "Folder and destination must belong to the same owner",
+      403,
+    );
+  }
+
+  // ==================== CYCLE CHECK ====================
+
+  /*
+    Prevent:
+
+    A
+    └── B
+        └── C
+
+    from doing:
+
+    move A → C
+
+    which would create a cycle.
+  */
+
   let currentId = parentId;
 
   while (currentId) {
     if (currentId === folderId) {
-      throw new AppError(
-        "Cannot move a folder inside its own descendant",
-        400
-      );
+      throw new AppError("Cannot move a folder inside its own descendant", 400);
     }
 
-    const current =
-      await prisma.folder.findUnique({
-        where: {
-          id: currentId,
-        },
+    const current = await prisma.folder.findUnique({
+      where: {
+        id: currentId,
+      },
 
-        select: {
-          parentId: true,
-        },
-      });
+      select: {
+        parentId: true,
+      },
+    });
 
     if (!current) {
-      throw new AppError(
-        "Destination folder not found",
-        404
-      );
+      throw new AppError("Destination folder not found", 404);
     }
 
     currentId = current.parentId;
   }
+
+  // ==================== MOVE ====================
 
   return prisma.folder.update({
     where: {
@@ -351,11 +376,7 @@ export async function moveFolder({
   });
 }
 
-
-export async function trashFolder({
-  folderId,
-  userId,
-}) {
+export async function trashFolder({ folderId, userId }) {
   await requireFolderPermission({
     folderId,
     userId,
@@ -380,10 +401,7 @@ export async function trashFolder({
     },
   });
 }
-export async function restoreFolder({
-  folderId,
-  userId,
-}) {
+export async function restoreFolder({ folderId, userId }) {
   await requireFolderPermission({
     folderId,
     userId,
@@ -391,35 +409,27 @@ export async function restoreFolder({
     allowTrashed: true,
   });
 
-  const folder =
-    await prisma.folder.findUnique({
-      where: {
-        id: folderId,
-      },
-    });
+  const folder = await prisma.folder.findUnique({
+    where: {
+      id: folderId,
+    },
+  });
 
   if (!folder) {
-    throw new AppError(
-      "Folder not found",
-      404
-    );
+    throw new AppError("Folder not found", 404);
   }
 
   if (!folder.isTrashed) {
-    throw new AppError(
-      "Folder is not in trash",
-      400
-    );
+    throw new AppError("Folder is not in trash", 400);
   }
 
   // Check entire ancestor chain.
   // If any ancestor is trashed/missing,
   // restore this folder to root.
-  const parentId =
-    await getValidRestoreParent({
-      parentId: folder.parentId,
-      userId,
-    });
+  const parentId = await getValidRestoreParent({
+    parentId: folder.parentId,
+    userId,
+  });
 
   return prisma.folder.update({
     where: {
@@ -442,71 +452,59 @@ export async function restoreFolder({
   });
 }
 
-export const listTrashedFolders = async ({
+export const listTrashedFolders = async ({ userId, page, limit }) => {
+  const skip = (page - 1) * limit;
+
+  const where = {
     userId,
-    page,
-    limit,
-  }) => {
-    const skip =
-      (page - 1) * limit;
-
-    const where = {
-      userId,
-      isTrashed: true,
-    };
-
-    const [folders, total] =
-      await prisma.$transaction([
-        prisma.folder.findMany({
-          where,
-
-          skip,
-          take: limit,
-
-          orderBy: {
-            trashedAt: "desc",
-          },
-
-          select: {
-            id: true,
-            name: true,
-            parentId: true,
-            trashedAt: true,
-            createdAt: true,
-          },
-        }),
-
-        prisma.folder.count({
-          where,
-        }),
-      ]);
-
-    return {
-      folders,
-
-      pagination: {
-        page,
-        limit,
-        total,
-
-        totalPages:
-          Math.ceil(total / limit),
-
-        hasNextPage:
-          page * limit < total,
-
-        hasPreviousPage:
-          page > 1,
-      },
-    };
+    isTrashed: true,
   };
+
+  const [folders, total] = await prisma.$transaction([
+    prisma.folder.findMany({
+      where,
+
+      skip,
+      take: limit,
+
+      orderBy: {
+        trashedAt: "desc",
+      },
+
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        trashedAt: true,
+        createdAt: true,
+      },
+    }),
+
+    prisma.folder.count({
+      where,
+    }),
+  ]);
+
+  return {
+    folders,
+
+    pagination: {
+      page,
+      limit,
+      total,
+
+      totalPages: Math.ceil(total / limit),
+
+      hasNextPage: page * limit < total,
+
+      hasPreviousPage: page > 1,
+    },
+  };
+};
 
 // ==================== COLLECT FOLDER SUBTREE ====================
 
-async function collectFolderSubtree({
-  folderId,
-  userId,
-}) {
+async function collectFolderSubtree({ folderId, userId }) {
   const folderIds = [];
   const queue = [folderId];
 
@@ -534,17 +532,14 @@ async function collectFolderSubtree({
   return folderIds;
 }
 
-export async function permanentlyDeleteFolder({
-  folderId,
-  userId,
-}) {
+export async function permanentlyDeleteFolder({ folderId, userId }) {
   // ==================== OWNER ONLY ====================
-await requireFolderPermission({
-  folderId,
-  userId,
-  minimum: PERMISSION.OWNER,
-  allowTrashed: true,
-});
+  await requireFolderPermission({
+    folderId,
+    userId,
+    minimum: PERMISSION.OWNER,
+    allowTrashed: true,
+  });
 
   const folder = await prisma.folder.findUnique({
     where: {
@@ -553,60 +548,48 @@ await requireFolderPermission({
   });
 
   if (!folder) {
-    throw new AppError(
-      "Folder not found",
-      404
-    );
+    throw new AppError("Folder not found", 404);
   }
 
   if (!folder.isTrashed) {
     throw new AppError(
       "Folder must be in trash before permanent deletion",
-      400
+      400,
     );
   }
 
   // ==================== COLLECT SUBTREE ====================
 
-  const folderIds =
-    await collectFolderSubtree({
-      folderId,
-      userId,
-    });
+  const folderIds = await collectFolderSubtree({
+    folderId,
+    userId,
+  });
 
   // ==================== FIND ALL FILES ====================
 
-  const files =
-    await prisma.file.findMany({
-      where: {
-        userId,
+  const files = await prisma.file.findMany({
+    where: {
+      userId,
 
-        folderId: {
-          in: folderIds,
-        },
+      folderId: {
+        in: folderIds,
       },
+    },
 
-      select: {
-        id: true,
-        userId: true,
-        objectKey: true,
-        size: true,
-      },
-    });
+    select: {
+      id: true,
+      userId: true,
+      objectKey: true,
+      size: true,
+    },
+  });
 
-  const totalSize =
-    files.reduce(
-      (sum, file) =>
-        sum + file.size,
-      0n
-    );
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0n);
 
   // ==================== DATABASE TRANSACTION ====================
 
-  const deletionJobs =
-    await prisma.$transaction(
-      async (tx) => {
-        /*
+  const deletionJobs = await prisma.$transaction(async (tx) => {
+    /*
           IMPORTANT:
 
           Don't delete folder hierarchy while
@@ -616,25 +599,24 @@ await requireFolderPermission({
           That upload may currently be going
           through initiate → B2 → confirm.
         */
-        const activeUploads =
-          await tx.uploadReservation.count({
-            where: {
-              folderId: {
-                in: folderIds,
-              },
+    const activeUploads = await tx.uploadReservation.count({
+      where: {
+        folderId: {
+          in: folderIds,
+        },
 
-              status: "PENDING",
-            },
-          });
+        status: "PENDING",
+      },
+    });
 
-        if (activeUploads > 0) {
-          throw new AppError(
-            "Folder has active uploads. Cancel them or wait for them to expire before permanent deletion.",
-            409
-          );
-        }
+    if (activeUploads > 0) {
+      throw new AppError(
+        "Folder has active uploads. Cancel them or wait for them to expire before permanent deletion.",
+        409,
+      );
+    }
 
-        /*
+    /*
           Completed / cancelled / expired
           reservation records can now be removed.
 
@@ -642,65 +624,59 @@ await requireFolderPermission({
           UploadReservation.folder uses
           onDelete: Restrict.
         */
-        await tx.uploadReservation.deleteMany({
-          where: {
-            folderId: {
-              in: folderIds,
-            },
-          },
-        });
+    await tx.uploadReservation.deleteMany({
+      where: {
+        folderId: {
+          in: folderIds,
+        },
+      },
+    });
 
-        // ==================== CREATE DELETION JOBS ====================
+    // ==================== CREATE DELETION JOBS ====================
 
-        const jobs = [];
+    const jobs = [];
 
-        /*
+    /*
           One physical B2 object
           = one durable deletion job.
         */
-        for (const file of files) {
-          const job =
-            await tx.storageDeletionJob.create({
-              data: {
-                userId:
-                  file.userId,
+    for (const file of files) {
+      const job = await tx.storageDeletionJob.create({
+        data: {
+          userId: file.userId,
 
-                fileId:
-                  file.id,
+          fileId: file.id,
 
-                objectKey:
-                  file.objectKey,
+          objectKey: file.objectKey,
 
-                size:
-                  file.size,
+          size: file.size,
 
-                status:
-                  "PENDING",
-              },
+          status: "PENDING",
+        },
 
-              select: {
-                id: true,
-              },
-            });
+        select: {
+          id: true,
+        },
+      });
 
-          jobs.push(job);
-        }
+      jobs.push(job);
+    }
 
-        // ==================== DELETE FILE METADATA ====================
+    // ==================== DELETE FILE METADATA ====================
 
-        await tx.file.deleteMany({
-          where: {
-            userId,
+    await tx.file.deleteMany({
+      where: {
+        userId,
 
-            folderId: {
-              in: folderIds,
-            },
-          },
-        });
+        folderId: {
+          in: folderIds,
+        },
+      },
+    });
 
-        // ==================== DELETE FOLDERS BOTTOM-UP ====================
+    // ==================== DELETE FOLDERS BOTTOM-UP ====================
 
-        /*
+    /*
           Example:
 
           A
@@ -713,39 +689,32 @@ await requireFolderPermission({
           C → B → A
         */
 
-        for (
-          let i =
-            folderIds.length - 1;
-          i >= 0;
-          i--
-        ) {
-          await tx.folder.delete({
-            where: {
-              id: folderIds[i],
-            },
-          });
-        }
+    for (let i = folderIds.length - 1; i >= 0; i--) {
+      await tx.folder.delete({
+        where: {
+          id: folderIds[i],
+        },
+      });
+    }
 
-        // ==================== RELEASE STORAGE ====================
+    // ==================== RELEASE STORAGE ====================
 
-        if (totalSize > 0n) {
-          await tx.user.update({
-            where: {
-              id: userId,
-            },
+    if (totalSize > 0n) {
+      await tx.user.update({
+        where: {
+          id: userId,
+        },
 
-            data: {
-              storageUsed: {
-                decrement:
-                  totalSize,
-              },
-            },
-          });
-        }
+        data: {
+          storageUsed: {
+            decrement: totalSize,
+          },
+        },
+      });
+    }
 
-        return jobs;
-      }
-    );
+    return jobs;
+  });
 
   // ==================== PUBLISH DELETION JOBS ====================
 
@@ -760,9 +729,7 @@ await requireFolderPermission({
 
   for (const job of deletionJobs) {
     try {
-      publishStorageDeletion(
-        job.id
-      );
+      publishStorageDeletion(job.id);
 
       publishedJobs++;
     } catch (error) {
@@ -775,26 +742,95 @@ await requireFolderPermission({
         will republish it later.
       */
 
-      console.error(
-        `Failed to publish storage deletion job ${job.id}:`,
-        error
-      );
+      console.error(`Failed to publish storage deletion job ${job.id}:`, error);
     }
   }
 
   return {
-    deletedFolders:
-      folderIds.length,
+    deletedFolders: folderIds.length,
 
-    deletedFiles:
-      files.length,
+    deletedFiles: files.length,
 
-    releasedStorage:
-      Number(totalSize),
+    releasedStorage: Number(totalSize),
 
-    deletionJobs:
-      deletionJobs.length,
+    deletionJobs: deletionJobs.length,
 
     publishedJobs,
+  };
+}
+
+export async function getFolderDetails({ folderId, userId }) {
+  const permission = await requireFolderPermission({
+    folderId,
+    userId,
+    minimum: PERMISSION.VIEWER,
+  });
+
+  const folder = await prisma.folder.findUnique({
+    where: {
+      id: folderId,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      userId: true,
+      parentId: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  if (!folder) {
+    throw new AppError("Folder not found", 404);
+  }
+
+  // ==================== BUILD BREADCRUMB ====================
+
+  const path = [];
+
+  let current = folder;
+
+  while (current) {
+    path.push({
+      id: current.id,
+      name: current.name,
+    });
+
+    if (!current.parentId) {
+      break;
+    }
+
+    current = await prisma.folder.findUnique({
+      where: {
+        id: current.parentId,
+      },
+
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+      },
+    });
+
+    if (!current) {
+      throw new AppError("Folder hierarchy is invalid", 500);
+    }
+  }
+
+  path.reverse();
+
+  return {
+    folder: {
+      id: folder.id,
+      name: folder.name,
+      parentId: folder.parentId,
+      createdAt: folder.createdAt,
+      updatedAt: folder.updatedAt,
+    },
+
+    permission,
+
+    path,
   };
 }

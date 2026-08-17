@@ -20,6 +20,7 @@ import {
   publicFolderShareController,
   publicFileDownloadController,
   publicFolderContentsController,
+  publicFolderFileDownloadController,
 } from "./share.controller.js";
 
 const router = Router();
@@ -34,6 +35,7 @@ router.get("/public/file/:token/download", publicFileDownloadController);
 
 router.get("/public/folder/:token", publicFolderShareController);
 router.get("/public/folder/:token/contents", publicFolderContentsController);
+router.get("/public/folder/:token/files/:fileId/download",publicFolderFileDownloadController);
 // ======================================================
 // AUTHENTICATED SHARE APIs
 // ======================================================
