@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "job:storage-deletion-recovery": "node src/jobs/storageDeletionRecovery.job.js"
+    "job:storage-deletion-recovery": "node src/jobs/storageDeletionRecovery.job.js",
+    "job:upload-cleanup": "node src/jobs/uploadCleanup.job.js"
   },
   "keywords": [],
   "author": "",

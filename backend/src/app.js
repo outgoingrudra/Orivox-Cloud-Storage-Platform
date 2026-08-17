@@ -11,8 +11,13 @@ import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
 import { notFound, errorHandler } from "./middlewares/error.middleware.js";
 import folderRoutes from "./modules/folder/folder.routes.js";
 import trashRoutes from "./modules/trash/trash.routes.js";
+import searchRoutes from "./modules/search/search.routes.js";
 const app = express();
 
+
+if (process.env.NODE_ENV === "production") {
+  app.set("trust proxy", 1);
+}
 // ==================== SECURITY ====================
 
 app.use(helmet());
@@ -51,6 +56,7 @@ app.use("/api/v1/files", fileRoutes);
 app.use("/api/v1/trash",trashRoutes);
 app.use("/api/v1/dashboard",dashboardRoutes);
 app.use("/api/v1/shares",shareRoutes);
+app.use( "/api/v1/search",searchRoutes);
 // ==================== 404 HANDLER ====================
 app.use(notFound);
 // ==================== GLOBAL ERROR HANDLER ====================

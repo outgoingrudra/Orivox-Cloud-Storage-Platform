@@ -20,11 +20,21 @@ export const updateShareSchema = z.object({
 });
 
 // ==================== SHARE LINK ====================
-
 export const createShareLinkSchema = z.object({
   expiresAt: z
     .string()
     .datetime()
     .nullable()
-    .optional(),
+    .optional()
+    .refine(
+      (value) => {
+        if (!value) return true;
+
+        return new Date(value) > new Date();
+      },
+      {
+        message: "Expiration time must be in the future",
+      }
+    ),
 });
+

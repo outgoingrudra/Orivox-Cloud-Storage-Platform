@@ -1059,3 +1059,76 @@ export async function getPublicFolderFileDownloadUrl({ token, fileId }) {
     expiresIn: 300,
   };
 }
+
+
+export async function getFileShareLinks({
+  fileId,
+  userId,
+}) {
+  const permission =
+    await getFilePermission({
+      fileId,
+      userId,
+    });
+
+  if (permission !== PERMISSION.OWNER) {
+    throw new AppError(
+      "Only the owner can view share links",
+      403
+    );
+  }
+
+  return prisma.fileShareLink.findMany({
+    where: {
+      fileId,
+      revokedAt: null,
+    },
+
+    orderBy: {
+      createdAt: "desc",
+    },
+
+    select: {
+      id: true,
+      expiresAt: true,
+      createdAt: true,
+      revokedAt: true,
+    },
+  });
+}
+
+export async function getFolderShareLinks({
+  folderId,
+  userId,
+}) {
+  const permission =
+    await getFolderPermission({
+      folderId,
+      userId,
+    });
+
+  if (permission !== PERMISSION.OWNER) {
+    throw new AppError(
+      "Only the owner can view share links",
+      403
+    );
+  }
+
+  return prisma.folderShareLink.findMany({
+    where: {
+      folderId,
+      revokedAt: null,
+    },
+
+    orderBy: {
+      createdAt: "desc",
+    },
+
+    select: {
+      id: true,
+      expiresAt: true,
+      createdAt: true,
+      revokedAt: true,
+    },
+  });
+}
