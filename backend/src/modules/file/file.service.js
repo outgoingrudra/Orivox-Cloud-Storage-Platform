@@ -565,7 +565,6 @@ export async function confirmUpload({ userId, reservationId }) {
     size: Number(file.size),
   };
 }
-
 export async function listFiles({
   userId,
   folderId,
@@ -588,42 +587,51 @@ export async function listFiles({
       minimum: PERMISSION.VIEWER,
     });
 
-    const folder = await prisma.folder.findUnique({
-      where: {
-        id: folderId,
-      },
+    const folder =
+      await prisma.folder.findUnique({
+        where: {
+          id: folderId,
+        },
 
-      select: {
-        userId: true,
-      },
-    });
+        select: {
+          userId: true,
+        },
+      });
 
     if (!folder) {
-      throw new AppError("Folder not found", 404);
+      throw new AppError(
+        "Folder not found",
+        404
+      );
     }
 
     /*
-      Important:
-
       If user is browsing somebody else's
-      shared folder, files belong to the
-      folder owner, not necessarily req.user.
+      shared folder, query resources belonging
+      to that folder's owner.
     */
-    resourceOwnerId = folder.userId;
+    resourceOwnerId =
+      folder.userId;
   }
 
   // ==================== MIME FILTER ====================
 
-  const mimeFilter = type && type !== "other" ? getMimeFilter(type) : null;
+  const mimeFilter =
+    type
+      ? getMimeFilter(type)
+      : {};
 
   // ==================== QUERY ====================
 
   const where = {
-    userId: resourceOwnerId,
+    userId:
+      resourceOwnerId,
 
-    isTrashed: false,
+    isTrashed:
+      false,
 
-    folderId: folderId || null,
+    folderId:
+      folderId || null,
 
     ...(search
       ? {
@@ -634,58 +642,64 @@ export async function listFiles({
         }
       : {}),
 
-    ...(mimeFilter
-      ? {
-          mimeType: mimeFilter,
-        }
-      : {}),
+    ...mimeFilter,
   };
 
-  const skip = (page - 1) * limit;
+  const skip =
+    (page - 1) * limit;
 
-  const [files, total] = await prisma.$transaction([
-    prisma.file.findMany({
-      where,
+  const [files, total] =
+    await prisma.$transaction([
+      prisma.file.findMany({
+        where,
 
-      skip,
-      take: limit,
+        skip,
+        take: limit,
 
-      orderBy: {
-        [sortBy]: order,
-      },
+        orderBy: {
+          [sortBy]: order,
+        },
 
-      select: {
-        id: true,
-        name: true,
-        mimeType: true,
-        size: true,
-        folderId: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
+        select: {
+          id: true,
+          name: true,
+          mimeType: true,
+          size: true,
+          folderId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
 
-    prisma.file.count({
-      where,
-    }),
-  ]);
+      prisma.file.count({
+        where,
+      }),
+    ]);
 
   return {
-    files: files.map((file) => ({
-      ...file,
-      size: Number(file.size),
-    })),
+    files: files.map(
+      (file) => ({
+        ...file,
+        size:
+          Number(file.size),
+      })
+    ),
 
     pagination: {
       page,
       limit,
       total,
 
-      totalPages: Math.ceil(total / limit),
+      totalPages:
+        Math.ceil(
+          total / limit
+        ),
 
-      hasNextPage: page * limit < total,
+      hasNextPage:
+        page * limit < total,
 
-      hasPreviousPage: page > 1,
+      hasPreviousPage:
+        page > 1,
     },
   };
 }

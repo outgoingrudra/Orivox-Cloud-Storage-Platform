@@ -92,49 +92,99 @@ export const findOwnedFile = async (
   return file;
 };
 
+
 export function getMimeFilter(type) {
+  const documentTypes = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "text/plain",
+    "text/csv",
+  ];
+
+  const archiveTypes = [
+    "application/zip",
+    "application/x-rar-compressed",
+    "application/x-7z-compressed",
+    "application/gzip",
+  ];
+
   switch (type) {
     case "image":
       return {
-        startsWith: "image/",
+        mimeType: {
+          startsWith: "image/",
+        },
       };
 
     case "video":
       return {
-        startsWith: "video/",
+        mimeType: {
+          startsWith: "video/",
+        },
       };
 
     case "audio":
       return {
-        startsWith: "audio/",
+        mimeType: {
+          startsWith: "audio/",
+        },
       };
 
     case "document":
       return {
-        in: [
-          "application/pdf",
-          "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.ms-excel",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "application/vnd.ms-powerpoint",
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          "text/plain",
-          "text/csv",
-        ],
+        mimeType: {
+          in: documentTypes,
+        },
       };
 
     case "archive":
       return {
-        in: [
-          "application/zip",
-          "application/x-rar-compressed",
-          "application/x-7z-compressed",
-          "application/gzip",
+        mimeType: {
+          in: archiveTypes,
+        },
+      };
+
+    case "other":
+      return {
+        NOT: [
+          {
+            mimeType: {
+              startsWith: "image/",
+            },
+          },
+
+          {
+            mimeType: {
+              startsWith: "video/",
+            },
+          },
+
+          {
+            mimeType: {
+              startsWith: "audio/",
+            },
+          },
+
+          {
+            mimeType: {
+              in: documentTypes,
+            },
+          },
+
+          {
+            mimeType: {
+              in: archiveTypes,
+            },
+          },
         ],
       };
 
     default:
-      return null;
+      return {};
   }
 }
