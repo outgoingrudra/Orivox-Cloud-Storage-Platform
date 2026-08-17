@@ -13,6 +13,8 @@ import {
 
 const BATCH_SIZE = 100;
 
+const STUCK_PROCESSING_MINUTES = 10;
+
 async function runStorageDeletionRecoveryJob() {
   try {
     await prisma.$connect();
@@ -23,10 +25,29 @@ async function runStorageDeletionRecoveryJob() {
       "Storage deletion recovery job started"
     );
 
+    const staleBefore = new Date(
+      Date.now() -
+        STUCK_PROCESSING_MINUTES *
+          60 *
+          1000
+    );
+
     const jobs =
       await prisma.storageDeletionJob.findMany({
         where: {
-          status: "PENDING",
+          OR: [
+            {
+              status: "PENDING",
+            },
+
+            {
+              status: "PROCESSING",
+
+              updatedAt: {
+                lt: staleBefore,
+              },
+            },
+          ],
         },
 
         orderBy: {
@@ -37,6 +58,7 @@ async function runStorageDeletionRecoveryJob() {
 
         select: {
           id: true,
+          status: true,
         },
       });
 
@@ -44,6 +66,40 @@ async function runStorageDeletionRecoveryJob() {
 
     for (const job of jobs) {
       try {
+        // ==================== RECOVER STUCK JOB ====================
+
+        if (job.status === "PROCESSING") {
+          const recovered =
+            await prisma.storageDeletionJob.updateMany({
+              where: {
+                id: job.id,
+
+                status: "PROCESSING",
+
+                updatedAt: {
+                  lt: staleBefore,
+                },
+              },
+
+              data: {
+                status: "PENDING",
+
+                lastError:
+                  "Recovered from stale PROCESSING state",
+              },
+            });
+
+          /*
+            Another process may already have
+            recovered/completed this job.
+          */
+          if (recovered.count !== 1) {
+            continue;
+          }
+        }
+
+        // ==================== REPUBLISH ====================
+
         publishStorageDeletion(
           job.id
         );
@@ -62,7 +118,6 @@ async function runStorageDeletionRecoveryJob() {
     );
 
     await closeRabbitMQ();
-
     await prisma.$disconnect();
 
     process.exit(0);
@@ -76,7 +131,9 @@ async function runStorageDeletionRecoveryJob() {
       await closeRabbitMQ();
     } catch {}
 
-    await prisma.$disconnect();
+    try {
+      await prisma.$disconnect();
+    } catch {}
 
     process.exit(1);
   }

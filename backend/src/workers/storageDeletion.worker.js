@@ -51,7 +51,7 @@ export async function startStorageDeletionWorker() {
           return;
         }
 
-        // Already processed
+        // Already completed
         if (
           job.status === "COMPLETED"
         ) {
@@ -59,9 +59,17 @@ export async function startStorageDeletionWorker() {
           return;
         }
 
+        // Already permanently failed
         if (
-          job.attempts >=
-          MAX_ATTEMPTS
+          job.status === "FAILED"
+        ) {
+          channel.ack(msg);
+          return;
+        }
+
+        // Retry limit reached
+        if (
+          job.attempts >= MAX_ATTEMPTS
         ) {
           await prisma.storageDeletionJob.update({
             where: {
@@ -70,30 +78,55 @@ export async function startStorageDeletionWorker() {
 
             data: {
               status: "FAILED",
+              lastError:
+                job.lastError ||
+                "Maximum deletion attempts reached",
             },
           });
 
           channel.ack(msg);
-
           return;
         }
 
-        // Mark processing
-        await prisma.storageDeletionJob.update({
-          where: {
-            id: job.id,
-          },
+        // ==================== ATOMIC CLAIM ====================
 
-          data: {
-            status: "PROCESSING",
+        /*
+          Only one worker should be able to move:
 
-            attempts: {
-              increment: 1,
+          PENDING → PROCESSING
+
+          If another worker already claimed this job,
+          updateMany returns count = 0.
+        */
+        const claimed =
+          await prisma.storageDeletionJob.updateMany({
+            where: {
+              id: job.id,
+              status: "PENDING",
             },
-          },
-        });
 
-        // Delete actual object from B2
+            data: {
+              status: "PROCESSING",
+
+              attempts: {
+                increment: 1,
+              },
+            },
+          });
+
+        if (claimed.count !== 1) {
+          /*
+            Another worker already owns this job,
+            or recovery/process state changed it.
+
+            Acknowledge this duplicate message.
+          */
+          channel.ack(msg);
+          return;
+        }
+
+        // ==================== DELETE FROM B2 ====================
+
         await storageClient.send(
           new DeleteObjectCommand({
             Bucket:
@@ -104,7 +137,8 @@ export async function startStorageDeletionWorker() {
           })
         );
 
-        // Mark success
+        // ==================== MARK COMPLETED ====================
+
         await prisma.storageDeletionJob.update({
           where: {
             id: job.id,
@@ -130,16 +164,23 @@ export async function startStorageDeletionWorker() {
 
         if (jobId) {
           try {
-            await prisma.storageDeletionJob.update({
+            /*
+              Put job back into PENDING so it
+              can be retried by RabbitMQ or
+              recovered by our scheduled job.
+            */
+            await prisma.storageDeletionJob.updateMany({
               where: {
                 id: jobId,
+                status: "PROCESSING",
               },
 
               data: {
                 status: "PENDING",
 
                 lastError:
-                  error.message,
+                  error.message ||
+                  "Storage deletion failed",
               },
             });
           } catch (dbError) {
@@ -151,11 +192,10 @@ export async function startStorageDeletionWorker() {
         }
 
         /*
-          Requeue so RabbitMQ can retry.
+          Requeue message.
 
-          Later we'll improve this with
-          retry delay / DLQ instead of
-          immediate retry loops.
+          Since the DB job was reset to PENDING,
+          this message can be claimed again.
         */
         channel.nack(
           msg,
