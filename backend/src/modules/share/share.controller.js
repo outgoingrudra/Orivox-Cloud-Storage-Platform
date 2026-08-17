@@ -8,11 +8,21 @@ import {
   getSharedWithMe,
   getFileShares,
   getFolderShares,
+
+  createFileShareLink,
+  createFolderShareLink,
+  revokeFileShareLink,
+  revokeFolderShareLink,
+  resolveFileShareLink,
+  resolveFolderShareLink,
+  getPublicFileDownloadUrl,
 } from "./share.service.js";
+
 
 import {
   createShareSchema,
   updateShareSchema,
+  createShareLinkSchema,
 } from "./share.validator.js";
 
 import { asyncHandler } from "../../utils/asyncHandler.js";
@@ -168,3 +178,171 @@ export const getFolderSharesController = asyncHandler(async (req, res) => {
     data,
   });
 });
+
+
+// ==================== CREATE FILE SHARE LINK ====================
+
+export const createFileShareLinkController =asyncHandler(async (req, res) => {
+    const result =
+      createShareLinkSchema.safeParse(
+        req.body
+      );
+
+    if (!result.success) {
+      throw new AppError(
+        result.error.issues[0].message,
+        400
+      );
+    }
+
+    const data =
+      await createFileShareLink({
+        fileId:
+          req.params.fileId,
+
+        userId:
+          req.user.id,
+
+        expiresAt:
+          result.data.expiresAt,
+      });
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "File share link created",
+      data,
+    });
+  });
+
+// ==================== CREATE FOLDER SHARE LINK ====================
+
+export const createFolderShareLinkController = asyncHandler(async (req, res) => {
+    const result =
+      createShareLinkSchema.safeParse(
+        req.body
+      );
+
+    if (!result.success) {
+      throw new AppError(
+        result.error.issues[0].message,
+        400
+      );
+    }
+
+    const data =
+      await createFolderShareLink({
+        folderId:
+          req.params.folderId,
+
+        userId:
+          req.user.id,
+
+        expiresAt:
+          result.data.expiresAt,
+      });
+
+    return res.status(201).json({
+      success: true,
+      message:
+        "Folder share link created",
+      data,
+    });
+  });
+
+// ==================== REVOKE FILE SHARE LINK ====================
+
+export const revokeFileShareLinkController =asyncHandler(async (req, res) => {
+    await revokeFileShareLink({
+      linkId:
+        req.params.linkId,
+
+      userId:
+        req.user.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "File share link revoked",
+    });
+  });
+
+// ==================== REVOKE FOLDER SHARE LINK ====================
+
+export const revokeFolderShareLinkController =asyncHandler(async (req, res) => {
+    await revokeFolderShareLink({
+      linkId:
+        req.params.linkId,
+
+      userId:
+        req.user.id,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Folder share link revoked",
+    });
+  });
+
+// ==================== PUBLIC FILE LINK ====================
+
+export const publicFileShareController =asyncHandler(async (req, res) => {
+    const data =
+      await resolveFileShareLink(
+        req.params.token
+      );
+
+    return res.status(200).json({
+      success: true,
+
+      data: {
+        id:
+          data.file.id,
+
+        name:
+          data.file.name,
+
+        mimeType:
+          data.file.mimeType,
+
+        size:
+          Number(data.file.size),
+      },
+    });
+  });
+
+// ==================== PUBLIC FOLDER LINK ====================
+
+export const publicFolderShareController =asyncHandler(async (req, res) => {
+    const data =
+      await resolveFolderShareLink(
+        req.params.token
+      );
+
+    return res.status(200).json({
+      success: true,
+
+      data: {
+        id:
+          data.folder.id,
+
+        name:
+          data.folder.name,
+      },
+    });
+  });
+
+
+export const publicFileDownloadController = asyncHandler(async (req, res) => {
+    const data =
+      await getPublicFileDownloadUrl(
+        req.params.token
+      );
+
+    return res.status(200).json({
+      success: true,
+      data,
+    });
+  });

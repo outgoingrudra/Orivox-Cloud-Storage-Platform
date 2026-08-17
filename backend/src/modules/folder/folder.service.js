@@ -60,15 +60,41 @@ export async function listFolders({
   page,
   limit,
 }) {
+  let resourceOwnerId = userId;
+
+  // ==================== SHARED FOLDER ACCESS ====================
+
   if (parentId) {
-    await findOwnedFolder(
-      parentId,
-      userId
-    );
+    await requireFolderPermission({
+      folderId: parentId,
+      userId,
+      minimum: PERMISSION.VIEWER,
+    });
+
+    const parentFolder = await prisma.folder.findUnique({
+      where: {
+        id: parentId,
+      },
+
+      select: {
+        userId: true,
+      },
+    });
+
+    if (!parentFolder) {
+      throw new AppError(
+        "Parent folder not found",
+        404
+      );
+    }
+
+    resourceOwnerId = parentFolder.userId;
   }
 
+  // ==================== QUERY ====================
+
   const where = {
-    userId,
+    userId: resourceOwnerId,
     isTrashed: false,
     parentId: parentId || null,
 
@@ -82,50 +108,48 @@ export async function listFolders({
       : {}),
   };
 
-  const skip =
-    (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
-  const [folders, total] =
-    await prisma.$transaction([
-      prisma.folder.findMany({
-        where,
+  const [folders, total] = await prisma.$transaction([
+    prisma.folder.findMany({
+      where,
 
-        skip,
-        take: limit,
+      skip,
+      take: limit,
 
-        orderBy: {
-          [sortBy]: order,
-        },
+      orderBy: {
+        [sortBy]: order,
+      },
 
-        select: {
-          id: true,
-          name: true,
-          parentId: true,
-          createdAt: true,
-          updatedAt: true,
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        createdAt: true,
+        updatedAt: true,
 
-          _count: {
-            select: {
-              children: {
-                where: {
-                  isTrashed: false,
-                },
+        _count: {
+          select: {
+            children: {
+              where: {
+                isTrashed: false,
               },
+            },
 
-              files: {
-                where: {
-                  isTrashed: false,
-                },
+            files: {
+              where: {
+                isTrashed: false,
               },
             },
           },
         },
-      }),
+      },
+    }),
 
-      prisma.folder.count({
-        where,
-      }),
-    ]);
+    prisma.folder.count({
+      where,
+    }),
+  ]);
 
   return {
     folders,
@@ -134,18 +158,15 @@ export async function listFolders({
       page,
       limit,
       total,
-      totalPages:
-        Math.ceil(total / limit),
 
-      hasNextPage:
-        page * limit < total,
+      totalPages: Math.ceil(total / limit),
 
-      hasPreviousPage:
-        page > 1,
+      hasNextPage: page * limit < total,
+
+      hasPreviousPage: page > 1,
     },
   };
 }
-
 
 export async function renameFolder({
   folderId,

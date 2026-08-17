@@ -18,3 +18,13 @@ export const updateShareSchema = z.object({
     "EDITOR",
   ]),
 });
+
+// ==================== SHARE LINK ====================
+
+export const createShareLinkSchema = z.object({
+  expiresAt: z
+    .string()
+    .datetime()
+    .nullable()
+    .optional(),
+});
