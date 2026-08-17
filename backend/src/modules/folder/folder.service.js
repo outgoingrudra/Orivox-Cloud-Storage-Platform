@@ -14,7 +14,10 @@ import {
   STORAGE_BUCKET,
 } from "../../config/storage.js";
 
-
+import {
+  requireFolderPermission,
+  PERMISSION,
+} from "../share/share.permission.js";
 
 export const createFolder = async ({
   name,
@@ -142,15 +145,18 @@ export async function listFolders({
     },
   };
 }
-export const renameFolder = async ({
+
+
+export async function renameFolder({
   folderId,
   userId,
   name,
-}) => {
-  await findOwnedFolder(
+}) {
+  await requireFolderPermission({
     folderId,
-    userId
-  );
+    userId,
+    minimum: PERMISSION.EDITOR,
+  });
 
   return prisma.folder.update({
     where: {
@@ -168,20 +174,34 @@ export const renameFolder = async ({
       updatedAt: true,
     },
   });
-};
+}
 
-export const moveFolder = async ({
+
+export async function moveFolder({
   folderId,
   userId,
   parentId,
-}) => {
-  const folder =
-    await findOwnedFolder(
+}) {
+  const permission =
+    await requireFolderPermission({
       folderId,
-      userId
-    );
+      userId,
+      minimum: PERMISSION.EDITOR,
+    });
 
-  // Moving folder to itself
+  const folder = await prisma.folder.findUnique({
+    where: {
+      id: folderId,
+    },
+  });
+
+  if (!folder) {
+    throw new AppError(
+      "Folder not found",
+      404
+    );
+  }
+
   if (folderId === parentId) {
     throw new AppError(
       "A folder cannot be moved inside itself",
@@ -189,8 +209,14 @@ export const moveFolder = async ({
     );
   }
 
-  // Move to root
-  if (parentId === null) {
+  if (!parentId) {
+    if (permission !== PERMISSION.OWNER) {
+      throw new AppError(
+        "Shared folders cannot be moved to your root",
+        403
+      );
+    }
+
     return prisma.folder.update({
       where: {
         id: folderId,
@@ -202,70 +228,64 @@ export const moveFolder = async ({
     });
   }
 
-  const destination =
-    await findOwnedFolder(
-      parentId,
-      userId
-    );
+  await requireFolderPermission({
+    folderId: parentId,
+    userId,
+    minimum: PERMISSION.EDITOR,
+  });
 
-  /*
-    Prevent cycles.
+  let currentId = parentId;
 
-    Example:
-
-    A
-      └── B
-           └── C
-
-    Moving A into C must NOT be allowed.
-  */
-
-  let currentFolder = destination;
-
-  while (currentFolder.parentId) {
-    if (
-      currentFolder.parentId ===
-      folderId
-    ) {
+  while (currentId) {
+    if (currentId === folderId) {
       throw new AppError(
         "Cannot move a folder inside its own descendant",
         400
       );
     }
 
-    currentFolder =
-      await findOwnedFolder(
-        currentFolder.parentId,
-        userId
+    const current =
+      await prisma.folder.findUnique({
+        where: {
+          id: currentId,
+        },
+
+        select: {
+          parentId: true,
+        },
+      });
+
+    if (!current) {
+      throw new AppError(
+        "Destination folder not found",
+        404
       );
+    }
+
+    currentId = current.parentId;
   }
 
   return prisma.folder.update({
     where: {
-      id: folder.id,
+      id: folderId,
     },
 
     data: {
       parentId,
     },
-
-    select: {
-      id: true,
-      name: true,
-      parentId: true,
-      updatedAt: true,
-    },
   });
-};
+}
 
-export const trashFolder = async ({
+
+export async function trashFolder({
   folderId,
   userId,
-}) => {
-  await findOwnedFolder(
+}) {
+  await requireFolderPermission({
     folderId,
-    userId
-  );
+    userId,
+    minimum: PERMISSION.OWNER,
+  });
 
   return prisma.folder.update({
     where: {
@@ -284,20 +304,30 @@ export const trashFolder = async ({
       trashedAt: true,
     },
   });
-};
+}
 
-export const restoreFolder = async ({
+export async function restoreFolder({
   folderId,
   userId,
-}) => {
-  const folder =
-    await findOwnedFolder(
-      folderId,
-      userId,
-      {
-        allowTrashed: true,
-      }
+}) {
+  await requireFolderPermission({
+    folderId,
+    userId,
+    minimum: PERMISSION.OWNER,
+  });
+
+  const folder = await prisma.folder.findUnique({
+    where: {
+      id: folderId,
+    },
+  });
+
+  if (!folder) {
+    throw new AppError(
+      "Folder not found",
+      404
     );
+  }
 
   if (!folder.isTrashed) {
     throw new AppError(
@@ -306,32 +336,25 @@ export const restoreFolder = async ({
     );
   }
 
-  /*
-    If parent itself has been trashed,
-    restoring the child into that hidden
-    parent would make it inaccessible.
-
-    Therefore restore to root.
-  */
-
   let parentId = folder.parentId;
 
   if (parentId) {
     const parent =
-      await prisma.folder.findFirst({
+      await prisma.folder.findUnique({
         where: {
           id: parentId,
-          userId,
         },
 
         select: {
           id: true,
+          userId: true,
           isTrashed: true,
         },
       });
 
     if (
       !parent ||
+      parent.userId !== userId ||
       parent.isTrashed
     ) {
       parentId = null;
@@ -357,8 +380,7 @@ export const restoreFolder = async ({
       trashedAt: true,
     },
   });
-};
-
+}
 export const listTrashedFolders = async ({
     userId,
     page,
@@ -451,18 +473,31 @@ async function collectFolderSubtree({
   return folderIds;
 }
 
+
 export async function permanentlyDeleteFolder({
   folderId,
   userId,
 }) {
-  const folder = await findOwnedFolder(
+  // ==================== OWNER PERMISSION ====================
+
+  await requireFolderPermission({
     folderId,
     userId,
-    {
-      allowTrashed: true,
-      checkAncestors: false,
-    }
-  );
+    minimum: PERMISSION.OWNER,
+  });
+
+  const folder = await prisma.folder.findUnique({
+    where: {
+      id: folderId,
+    },
+  });
+
+  if (!folder) {
+    throw new AppError(
+      "Folder not found",
+      404
+    );
+  }
 
   if (!folder.isTrashed) {
     throw new AppError(
@@ -471,11 +506,15 @@ export async function permanentlyDeleteFolder({
     );
   }
 
+  // ==================== COLLECT ENTIRE SUBTREE ====================
+
   const folderIds =
     await collectFolderSubtree({
       folderId,
       userId,
     });
+
+  // ==================== GET ALL FILES ====================
 
   const files =
     await prisma.file.findMany({
@@ -497,34 +536,54 @@ export async function permanentlyDeleteFolder({
   // ==================== DELETE B2 OBJECTS ====================
 
   if (files.length > 0) {
-    const objects = files.map((file) => ({
-      Key: file.objectKey,
-    }));
+    const objects =
+      files.map((file) => ({
+        Key: file.objectKey,
+      }));
 
     /*
-      S3-compatible DeleteObjects supports
-      up to 1000 objects per request.
+      S3-compatible DeleteObjects allows
+      max 1000 objects per request.
     */
+
     for (
       let i = 0;
       i < objects.length;
       i += 1000
     ) {
       const batch =
-        objects.slice(i, i + 1000);
+        objects.slice(
+          i,
+          i + 1000
+        );
 
-      await storageClient.send(
-        new DeleteObjectsCommand({
-          Bucket: STORAGE_BUCKET,
+      try {
+        await storageClient.send(
+          new DeleteObjectsCommand({
+            Bucket:
+              STORAGE_BUCKET,
 
-          Delete: {
-            Objects: batch,
-            Quiet: true,
-          },
-        })
-      );
+            Delete: {
+              Objects: batch,
+              Quiet: true,
+            },
+          })
+        );
+      } catch (error) {
+        console.error(
+          "Failed to delete folder objects from B2:",
+          error
+        );
+
+        throw new AppError(
+          "Unable to delete folder files from storage",
+          502
+        );
+      }
     }
   }
+
+  // ==================== CALCULATE RELEASED STORAGE ====================
 
   const totalSize =
     files.reduce(
@@ -535,51 +594,71 @@ export async function permanentlyDeleteFolder({
 
   // ==================== DATABASE CLEANUP ====================
 
-  await prisma.$transaction(async (tx) => {
-    // Delete files first because folders reference them
-    await tx.file.deleteMany({
-      where: {
-        userId,
+  await prisma.$transaction(
+    async (tx) => {
+      /*
+        Delete files first.
 
-        folderId: {
-          in: folderIds,
-        },
-      },
-    });
+        Their folderId references folders
+        inside the subtree.
+      */
 
-    /*
-      Delete folders bottom-up.
-
-      parent relation uses onDelete: Restrict,
-      so children must disappear before parents.
-    */
-
-    for (
-      let i = folderIds.length - 1;
-      i >= 0;
-      i--
-    ) {
-      await tx.folder.delete({
+      await tx.file.deleteMany({
         where: {
-          id: folderIds[i],
-        },
-      });
-    }
+          userId,
 
-    if (totalSize > 0n) {
-      await tx.user.update({
-        where: {
-          id: userId,
-        },
-
-        data: {
-          storageUsed: {
-            decrement: totalSize,
+          folderId: {
+            in: folderIds,
           },
         },
       });
+
+      /*
+        Delete folders bottom-up.
+
+        Example:
+
+        A
+        └── B
+            └── C
+
+        Delete:
+        C → B → A
+
+        because our parent relation uses
+        onDelete: Restrict.
+      */
+
+      for (
+        let i =
+          folderIds.length - 1;
+        i >= 0;
+        i--
+      ) {
+        await tx.folder.delete({
+          where: {
+            id: folderIds[i],
+          },
+        });
+      }
+
+      // Update user's consumed storage
+      if (totalSize > 0n) {
+        await tx.user.update({
+          where: {
+            id: userId,
+          },
+
+          data: {
+            storageUsed: {
+              decrement:
+                totalSize,
+            },
+          },
+        });
+      }
     }
-  });
+  );
 
   return {
     deletedFolders:

@@ -13,19 +13,22 @@ import {
   generateObjectKey,
   validateOwnedFolder,
   findOwnedFile,
-  getMimeFilter
+  getMimeFilter,
 } from "./file.helper.js";
-
+import {
+  requireFilePermission,
+  requireFolderPermission,
+  PERMISSION,
+} from "../share/share.permission.js";
 import { AppError } from "../../utils/AppError.js";
 
 const UPLOAD_EXPIRY_MS = 15 * 60 * 1000;
 
 const PRESIGNED_URL_EXPIRY_SECONDS = 15 * 60;
-
-export const cleanupExpiredReservations = async (userId) => {
+export async function cleanupExpiredReservations(ownerId) {
   const expired = await prisma.uploadReservation.findMany({
     where: {
-      userId,
+      ownerId,
       status: "PENDING",
 
       expiresAt: {
@@ -37,15 +40,23 @@ export const cleanupExpiredReservations = async (userId) => {
       id: true,
       size: true,
       objectKey: true,
+      ownerId: true,
     },
   });
 
   for (const reservation of expired) {
     const released = await prisma.$transaction(async (tx) => {
+      /*
+            Claim the reservation only if
+            it is still PENDING.
+
+            This prevents double quota release
+            if multiple cleanup processes run.
+          */
       const updated = await tx.uploadReservation.updateMany({
         where: {
           id: reservation.id,
-          userId,
+          ownerId: reservation.ownerId,
           status: "PENDING",
         },
 
@@ -60,7 +71,7 @@ export const cleanupExpiredReservations = async (userId) => {
 
       await tx.user.update({
         where: {
-          id: userId,
+          id: reservation.ownerId,
         },
 
         data: {
@@ -77,8 +88,7 @@ export const cleanupExpiredReservations = async (userId) => {
       continue;
     }
 
-    // Clean object in case user uploaded it
-    // but never called /confirm.
+    // Remove possible orphaned B2 object
     try {
       await storageClient.send(
         new DeleteObjectCommand({
@@ -93,33 +103,71 @@ export const cleanupExpiredReservations = async (userId) => {
       );
     }
   }
-};
-
-export const initiateUpload = async ({
+}
+export async function initiateUpload({
   userId,
   fileName,
   mimeType,
   size,
   folderId,
-}) => {
+}) {
   const fileSize = BigInt(size);
 
-  await cleanupExpiredReservations(userId);
+  let ownerId = userId;
 
-  await validateOwnedFolder({
-    folderId,
-    userId,
-  });
+  // ==================== DESTINATION ====================
+
+  if (folderId) {
+    await requireFolderPermission({
+      folderId,
+      userId,
+      minimum: PERMISSION.EDITOR,
+    });
+
+    const folder = await prisma.folder.findUnique({
+      where: {
+        id: folderId,
+      },
+
+      select: {
+        id: true,
+        userId: true,
+      },
+    });
+
+    if (!folder) {
+      throw new AppError("Destination folder not found", 404);
+    }
+
+    /*
+      File uploaded inside a folder belongs
+      to that folder's owner.
+
+      Example:
+      Rudra owns folder.
+      John is editor.
+      John uploads.
+      File still belongs to Rudra.
+    */
+    ownerId = folder.userId;
+  }
+
+  // Clean reservations belonging to the storage owner
+  await cleanupExpiredReservations(ownerId);
+
+  // ==================== OBJECT KEY ====================
 
   const objectKey = generateObjectKey({
-    userId,
+    userId: ownerId,
     fileName,
   });
 
+  // ==================== RESERVE OWNER STORAGE ====================
+
   const reservation = await prisma.$transaction(async (tx) => {
-    const user = await tx.user.findUnique({
+    const owner = await tx.user.findUnique({
       where: {
-        id: userId,
+        id: ownerId,
       },
 
       select: {
@@ -129,19 +177,20 @@ export const initiateUpload = async ({
       },
     });
 
-    if (!user) {
-      throw new AppError("User not found", 404);
+    if (!owner) {
+      throw new AppError("Storage owner not found", 404);
     }
 
-    const requiredStorage = user.storageUsed + user.storageReserved + fileSize;
+    const requiredStorage =
+      owner.storageUsed + owner.storageReserved + fileSize;
 
-    if (requiredStorage > user.storageLimit) {
+    if (requiredStorage > owner.storageLimit) {
       throw new AppError("Storage limit exceeded", 413);
     }
 
     await tx.user.update({
       where: {
-        id: userId,
+        id: ownerId,
       },
 
       data: {
@@ -153,7 +202,11 @@ export const initiateUpload = async ({
 
     return tx.uploadReservation.create({
       data: {
-        userId,
+        ownerId,
+
+        // Person actually making request
+        initiatedById: userId,
+
         folderId: folderId || null,
 
         fileName,
@@ -172,11 +225,11 @@ export const initiateUpload = async ({
     });
   });
 
+  // ==================== PRESIGNED URL ====================
+
   const command = new PutObjectCommand({
     Bucket: STORAGE_BUCKET,
-
     Key: objectKey,
-
     ContentType: mimeType,
   });
 
@@ -193,14 +246,17 @@ export const initiateUpload = async ({
 
     expiresAt: reservation.expiresAt,
   };
-};
+}
 
-export const cancelUpload = async ({ userId, reservationId }) => {
+export async function cancelUpload({ userId, reservationId }) {
   const reservation = await prisma.$transaction(async (tx) => {
     const current = await tx.uploadReservation.findFirst({
       where: {
         id: reservationId,
-        userId,
+
+        // Caller must be the original initiator
+        initiatedById: userId,
+
         status: "PENDING",
       },
     });
@@ -209,12 +265,13 @@ export const cancelUpload = async ({ userId, reservationId }) => {
       throw new AppError("Active upload reservation not found", 404);
     }
 
-    // Claim the reservation.
-    // Only a PENDING reservation can become CANCELLED.
+    // Claim reservation atomically
     const updated = await tx.uploadReservation.updateMany({
       where: {
         id: current.id,
-        userId,
+
+        initiatedById: userId,
+
         status: "PENDING",
       },
 
@@ -227,9 +284,14 @@ export const cancelUpload = async ({ userId, reservationId }) => {
       throw new AppError("Upload reservation already processed", 409);
     }
 
+    /*
+          IMPORTANT:
+          reserved quota belongs to owner,
+          NOT necessarily uploader.
+        */
     await tx.user.update({
       where: {
-        id: userId,
+        id: current.ownerId,
       },
 
       data: {
@@ -242,8 +304,7 @@ export const cancelUpload = async ({ userId, reservationId }) => {
     return current;
   });
 
-  // There might already be an object if upload started
-  // before the user cancelled.
+  // Delete possible uploaded/orphan object
   try {
     await storageClient.send(
       new DeleteObjectCommand({
@@ -258,59 +319,40 @@ export const cancelUpload = async ({ userId, reservationId }) => {
   return {
     reservationId,
   };
-};
-
-export const confirmUpload = async ({
-  userId,
-  reservationId,
-}) => {
-  const reservation =
-    await prisma.uploadReservation.findFirst({
-      where: {
-        id: reservationId,
-        userId,
-        status: "PENDING",
-      },
-    });
+}
+export async function confirmUpload({ userId, reservationId }) {
+  const reservation = await prisma.uploadReservation.findFirst({
+    where: {
+      id: reservationId,
+      initiatedById: userId,
+      status: "PENDING",
+    },
+  });
 
   if (!reservation) {
-    throw new AppError(
-      "Upload reservation not found",
-      404
-    );
+    throw new AppError("Upload reservation not found", 404);
   }
 
   if (reservation.expiresAt < new Date()) {
-    throw new AppError(
-      "Upload reservation expired",
-      400
-    );
+    throw new AppError("Upload reservation expired", 400);
   }
 
   // ==================== CHECK DESTINATION FOLDER ====================
 
   if (reservation.folderId) {
     try {
-      await validateOwnedFolder({
+      await requireFolderPermission({
         folderId: reservation.folderId,
         userId,
+        minimum: PERMISSION.EDITOR,
       });
     } catch {
-      /*
-        Folder may have been trashed/moved into a
-        trashed ancestor after upload was initiated.
-
-        Release quota + remove possible B2 object.
-      */
       await cancelUpload({
         userId,
         reservationId,
       });
 
-      throw new AppError(
-        "Destination folder is no longer available",
-        409
-      );
+      throw new AppError("Destination folder is no longer available", 409);
     }
   }
 
@@ -323,147 +365,116 @@ export const confirmUpload = async ({
       new HeadObjectCommand({
         Bucket: STORAGE_BUCKET,
         Key: reservation.objectKey,
-      })
+      }),
     );
   } catch {
-    throw new AppError(
-      "Uploaded file not found in storage",
-      400
-    );
+    throw new AppError("Uploaded file not found in storage", 400);
   }
 
   // ==================== VERIFY FILE SIZE ====================
 
-  const actualSize =
-    BigInt(head.ContentLength ?? 0);
+  const actualSize = BigInt(head.ContentLength ?? 0);
 
   if (actualSize !== reservation.size) {
-    // Delete wrong/incomplete object
     try {
       await storageClient.send(
         new DeleteObjectCommand({
           Bucket: STORAGE_BUCKET,
           Key: reservation.objectKey,
-        })
+        }),
       );
     } catch (error) {
-      console.error(
-        "Failed to delete invalid uploaded object:",
-        error
-      );
+      console.error("Failed to delete invalid uploaded object:", error);
     }
 
-    /*
-      Release reservation too,
-      otherwise storageReserved would remain locked.
-    */
     await cancelUpload({
       userId,
       reservationId,
     });
 
-    throw new AppError(
-      "Uploaded file size does not match reservation",
-      400
-    );
+    throw new AppError("Uploaded file size does not match reservation", 400);
   }
 
   // ==================== FINALIZE UPLOAD ====================
 
-  const file = await prisma.$transaction(
-    async (tx) => {
-      /*
-        Re-fetch inside transaction.
+  const file = await prisma.$transaction(async (tx) => {
+    const latestReservation = await tx.uploadReservation.findFirst({
+      where: {
+        id: reservationId,
 
-        This protects against:
-        confirm being called twice
-        cancel happening at the same time
-        cleanup expiring the reservation
-      */
-      const latestReservation =
-        await tx.uploadReservation.findFirst({
-          where: {
-            id: reservationId,
-            userId,
-            status: "PENDING",
-          },
-        });
+        // The caller must be the one who initiated it
+        initiatedById: userId,
 
-      if (!latestReservation) {
-        throw new AppError(
-          "Upload already processed",
-          409
-        );
-      }
+        status: "PENDING",
+      },
+    });
 
-      const createdFile =
-        await tx.file.create({
-          data: {
-            name:
-              latestReservation.fileName,
-
-            objectKey:
-              latestReservation.objectKey,
-
-            mimeType:
-              latestReservation.mimeType,
-
-            size:
-              latestReservation.size,
-
-            userId,
-
-            folderId:
-              latestReservation.folderId,
-          },
-
-          select: {
-            id: true,
-            name: true,
-            mimeType: true,
-            size: true,
-            folderId: true,
-            createdAt: true,
-          },
-        });
-
-      await tx.user.update({
-        where: {
-          id: userId,
-        },
-
-        data: {
-          storageReserved: {
-            decrement:
-              latestReservation.size,
-          },
-
-          storageUsed: {
-            increment:
-              latestReservation.size,
-          },
-        },
-      });
-
-      await tx.uploadReservation.update({
-        where: {
-          id: latestReservation.id,
-        },
-
-        data: {
-          status: "COMPLETED",
-        },
-      });
-
-      return createdFile;
+    if (!latestReservation) {
+      throw new AppError("Upload already processed", 409);
     }
-  );
+
+    const createdFile = await tx.file.create({
+      data: {
+        name: latestReservation.fileName,
+
+        objectKey: latestReservation.objectKey,
+
+        mimeType: latestReservation.mimeType,
+
+        size: latestReservation.size,
+
+        // IMPORTANT:
+        // file belongs to storage/folder owner
+        userId: latestReservation.ownerId,
+
+        folderId: latestReservation.folderId,
+      },
+
+      select: {
+        id: true,
+        name: true,
+        mimeType: true,
+        size: true,
+        folderId: true,
+        createdAt: true,
+      },
+    });
+
+    // Quota also belongs to owner
+    await tx.user.update({
+      where: {
+        id: latestReservation.ownerId,
+      },
+
+      data: {
+        storageReserved: {
+          decrement: latestReservation.size,
+        },
+
+        storageUsed: {
+          increment: latestReservation.size,
+        },
+      },
+    });
+
+    await tx.uploadReservation.update({
+      where: {
+        id: latestReservation.id,
+      },
+
+      data: {
+        status: "COMPLETED",
+      },
+    });
+
+    return createdFile;
+  });
 
   return {
     ...file,
     size: Number(file.size),
   };
-};
+}
 
 export async function listFiles({
   userId,
@@ -482,10 +493,7 @@ export async function listFiles({
     });
   }
 
-  const mimeFilter =
-    type && type !== "other"
-      ? getMimeFilter(type)
-      : null;
+  const mimeFilter = type && type !== "other" ? getMimeFilter(type) : null;
 
   const where = {
     userId,
@@ -508,36 +516,34 @@ export async function listFiles({
       : {}),
   };
 
-  const skip =
-    (page - 1) * limit;
+  const skip = (page - 1) * limit;
 
-  const [files, total] =
-    await prisma.$transaction([
-      prisma.file.findMany({
-        where,
+  const [files, total] = await prisma.$transaction([
+    prisma.file.findMany({
+      where,
 
-        skip,
-        take: limit,
+      skip,
+      take: limit,
 
-        orderBy: {
-          [sortBy]: order,
-        },
+      orderBy: {
+        [sortBy]: order,
+      },
 
-        select: {
-          id: true,
-          name: true,
-          mimeType: true,
-          size: true,
-          folderId: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      }),
+      select: {
+        id: true,
+        name: true,
+        mimeType: true,
+        size: true,
+        folderId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
 
-      prisma.file.count({
-        where,
-      }),
-    ]);
+    prisma.file.count({
+      where,
+    }),
+  ]);
 
   return {
     files: files.map((file) => ({
@@ -550,19 +556,21 @@ export async function listFiles({
       limit,
       total,
 
-      totalPages:
-        Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit),
 
-      hasNextPage:
-        page * limit < total,
+      hasNextPage: page * limit < total,
 
-      hasPreviousPage:
-        page > 1,
+      hasPreviousPage: page > 1,
     },
   };
 }
-export const renameFile = async ({ fileId, userId, name }) => {
-  await findOwnedFile(fileId, userId);
+
+export async function renameFile({ fileId, userId, name }) {
+  await requireFilePermission({
+    fileId,
+    userId,
+    minimum: PERMISSION.EDITOR,
+  });
 
   const file = await prisma.file.update({
     where: {
@@ -587,16 +595,89 @@ export const renameFile = async ({ fileId, userId, name }) => {
     ...file,
     size: Number(file.size),
   };
-};
+}
 
-export const moveFile = async ({ fileId, userId, folderId }) => {
-  await findOwnedFile(fileId, userId);
+export async function moveFile({ fileId, userId, folderId }) {
+  const permission = await requireFilePermission({
+    fileId,
+    userId,
+    minimum: PERMISSION.EDITOR,
+  });
+
+  const existingFile = await prisma.file.findUnique({
+    where: {
+      id: fileId,
+    },
+
+    select: {
+      id: true,
+      userId: true,
+      folderId: true,
+    },
+  });
+
+  if (!existingFile) {
+    throw new AppError("File not found", 404);
+  }
+
+  // ==================== MOVE TO ROOT ====================
+
+  if (!folderId) {
+    /*
+      Only the actual owner can move a file
+      to their root directory.
+
+      A shared EDITOR cannot take someone
+      else's file out of the owner's folder tree.
+    */
+    if (existingFile.userId !== userId) {
+      throw new AppError("Shared files cannot be moved to your root", 403);
+    }
+  }
+
+  // ==================== MOVE INTO FOLDER ====================
 
   if (folderId) {
-    await validateOwnedFolder({
+    const destinationPermission = await requireFolderPermission({
       folderId,
       userId,
+      minimum: PERMISSION.EDITOR,
     });
+
+    const destination = await prisma.folder.findUnique({
+      where: {
+        id: folderId,
+      },
+
+      select: {
+        id: true,
+        userId: true,
+      },
+    });
+
+    if (!destination) {
+      throw new AppError("Destination folder not found", 404);
+    }
+
+    /*
+      Prevent moving somebody else's shared file
+      into a folder owned by a completely different user.
+
+      Example:
+
+      John owns file A
+      Rudra has EDITOR access to file A
+      Rudra owns folder B
+
+      Rudra should NOT move John's file into
+      Rudra's own folder B.
+    */
+    if (existingFile.userId !== destination.userId) {
+      throw new AppError(
+        "File and destination folder must belong to the same owner",
+        403,
+      );
+    }
   }
 
   const file = await prisma.file.update({
@@ -622,21 +703,27 @@ export const moveFile = async ({ fileId, userId, folderId }) => {
     ...file,
     size: Number(file.size),
   };
-};
+}
+export async function getFileDownloadUrl({ fileId, userId }) {
+  await requireFilePermission({
+    fileId,
+    userId,
+    minimum: PERMISSION.VIEWER,
+  });
 
-export const getFileDownloadUrl = async ({ fileId, userId }) => {
-  const file = await findOwnedFile(fileId, userId);
+  const file = await prisma.file.findUnique({
+    where: { id: fileId },
+  });
+
+  if (!file) {
+    throw new AppError("File not found", 404);
+  }
 
   const command = new GetObjectCommand({
     Bucket: STORAGE_BUCKET,
-
     Key: file.objectKey,
-
     ResponseContentType: file.mimeType,
-
-    ResponseContentDisposition: `attachment; filename="${encodeURIComponent(
-      file.name,
-    )}"`,
+    ResponseContentDisposition: `attachment; filename="${encodeURIComponent(file.name)}"`,
   });
 
   const downloadUrl = await getSignedUrl(storageClient, command, {
@@ -647,10 +734,14 @@ export const getFileDownloadUrl = async ({ fileId, userId }) => {
     downloadUrl,
     expiresIn: 300,
   };
-};
+}
 
-export const trashFile = async ({ fileId, userId }) => {
-  await findOwnedFile(fileId, userId);
+export async function trashFile({ fileId, userId }) {
+  const permission = await requireFilePermission({
+    fileId,
+    userId,
+    minimum: PERMISSION.OWNER,
+  });
 
   const file = await prisma.file.update({
     where: {
@@ -671,8 +762,7 @@ export const trashFile = async ({ fileId, userId }) => {
   });
 
   return file;
-};
-
+}
 export const restoreFile = async ({ fileId, userId }) => {
   const file = await findOwnedFile(fileId, userId, {
     allowTrashed: true,
@@ -736,24 +826,13 @@ export const restoreFile = async ({ fileId, userId }) => {
   };
 };
 
-
-export async function permanentlyDeleteFile({
-  fileId,
-  userId,
-}) {
-  const file = await findOwnedFile(
-    fileId,
-    userId,
-    {
-      allowTrashed: true,
-    }
-  );
+export async function permanentlyDeleteFile({ fileId, userId }) {
+  const file = await findOwnedFile(fileId, userId, {
+    allowTrashed: true,
+  });
 
   if (!file.isTrashed) {
-    throw new AppError(
-      "File must be in trash before permanent deletion",
-      400
-    );
+    throw new AppError("File must be in trash before permanent deletion", 400);
   }
 
   // Delete actual object from B2 first
@@ -762,18 +841,12 @@ export async function permanentlyDeleteFile({
       new DeleteObjectCommand({
         Bucket: STORAGE_BUCKET,
         Key: file.objectKey,
-      })
+      }),
     );
   } catch (error) {
-    console.error(
-      `B2 deletion failed for ${file.objectKey}:`,
-      error
-    );
+    console.error(`B2 deletion failed for ${file.objectKey}:`, error);
 
-    throw new AppError(
-      "Unable to delete file from storage",
-      502
-    );
+    throw new AppError("Unable to delete file from storage", 502);
   }
 
   // Only update DB after storage deletion succeeds

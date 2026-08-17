@@ -24,10 +24,11 @@ model User {
   folders             Folder[]
   storageReserved     BigInt                   @default(0)
 
-  files              File[]
-  uploadReservations UploadReservation[]
-  fileSharesReceived FileShare[]         @relation("FileSharedWith")
-  fileSharesCreated  FileShare[]         @relation("FileSharedBy")
+  files                       File[]
+  ownedUploadReservations     UploadReservation[] @relation("UploadReservationOwner")
+  initiatedUploadReservations UploadReservation[] @relation("UploadReservationInitiator")
+  fileSharesReceived          FileShare[]         @relation("FileSharedWith")
+  fileSharesCreated           FileShare[]         @relation("FileSharedBy")
 
   folderSharesReceived FolderShare[] @relation("FolderSharedWith")
   folderSharesCreated  FolderShare[] @relation("FolderSharedBy")
@@ -151,8 +152,13 @@ model File {
 model UploadReservation {
   id String @id @default(cuid())
 
-  userId String
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // User whose storage/file ownership is being used
+  ownerId String
+  owner   User   @relation("UploadReservationOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // User who actually initiated the upload
+  initiatedById String
+  initiatedBy   User   @relation("UploadReservationInitiator", fields: [initiatedById], references: [id], onDelete: Cascade)
 
   folderId String?
   folder   Folder? @relation(fields: [folderId], references: [id], onDelete: Restrict)
@@ -170,7 +176,8 @@ model UploadReservation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([userId])
+  @@index([ownerId])
+  @@index([initiatedById])
   @@index([status])
   @@index([expiresAt])
 }
