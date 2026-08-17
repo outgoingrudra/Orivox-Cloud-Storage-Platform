@@ -4,9 +4,7 @@ let connection;
 let channel;
 
 export const connectRabbitMQ = async () => {
-  connection = await amqp.connect(
-    process.env.RABBITMQ_URL
-  );
+  connection = await amqp.connect(process.env.RABBITMQ_URL);
 
   channel = await connection.createChannel();
 
@@ -15,6 +13,9 @@ export const connectRabbitMQ = async () => {
   });
 
   await channel.assertQueue("password.reset", {
+    durable: true,
+  });
+  await channel.assertQueue("storage.deletion", {
     durable: true,
   });
 

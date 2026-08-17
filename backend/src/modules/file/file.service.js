@@ -20,6 +20,10 @@ import {
   requireFolderPermission,
   PERMISSION,
 } from "../share/share.permission.js";
+import {
+  publishStorageDeletion,
+} from "./file.publisher.js";
+
 import { AppError } from "../../utils/AppError.js";
 
 const UPLOAD_EXPIRY_MS = 15 * 60 * 1000;
@@ -871,53 +875,158 @@ export const restoreFile = async ({ fileId, userId }) => {
   };
 };
 
-export async function permanentlyDeleteFile({ fileId, userId }) {
-  const file = await findOwnedFile(fileId, userId, {
-    allowTrashed: true,
+export async function permanentlyDeleteFile({
+  fileId,
+  userId,
+}) {
+  // ==================== OWNER PERMISSION ====================
+
+  await requireFilePermission({
+    fileId,
+    userId,
+    minimum: PERMISSION.OWNER,
   });
 
-  if (!file.isTrashed) {
-    throw new AppError("File must be in trash before permanent deletion", 400);
+  const file = await prisma.file.findUnique({
+    where: {
+      id: fileId,
+    },
+
+    select: {
+      id: true,
+      userId: true,
+      name: true,
+      objectKey: true,
+      size: true,
+      isTrashed: true,
+    },
+  });
+
+  if (!file) {
+    throw new AppError(
+      "File not found",
+      404
+    );
   }
 
-  // Delete actual object from B2 first
+  if (!file.isTrashed) {
+    throw new AppError(
+      "File must be in trash before permanent deletion",
+      400
+    );
+  }
+
+  // ==================== DATABASE TRANSACTION ====================
+
+  const deletionJob =
+    await prisma.$transaction(
+      async (tx) => {
+        /*
+          Create deletion job FIRST.
+
+          This becomes our durable record saying:
+          "this B2 object must eventually be deleted."
+        */
+
+        const job =
+          await tx.storageDeletionJob.create({
+            data: {
+              userId: file.userId,
+
+              fileId: file.id,
+
+              objectKey:
+                file.objectKey,
+
+              size:
+                file.size,
+
+              status:
+                "PENDING",
+            },
+
+            select: {
+              id: true,
+            },
+          });
+
+        /*
+          Remove logical file metadata.
+
+          User should no longer see/access
+          this file after permanent deletion.
+        */
+
+        await tx.file.delete({
+          where: {
+            id: file.id,
+          },
+        });
+
+        /*
+          Release user's actual used storage.
+
+          The logical file is now deleted from
+          Orivox even though physical B2 cleanup
+          may happen milliseconds later.
+        */
+
+        await tx.user.update({
+          where: {
+            id: file.userId,
+          },
+
+          data: {
+            storageUsed: {
+              decrement:
+                file.size,
+            },
+          },
+        });
+
+        return job;
+      }
+    );
+
+  // ==================== PUBLISH DELETION JOB ====================
+
+  /*
+    IMPORTANT:
+    Publish AFTER DB transaction.
+
+    RabbitMQ is not part of the PostgreSQL
+    transaction, so we don't pretend both
+    systems are atomic.
+  */
+
   try {
-    await storageClient.send(
-      new DeleteObjectCommand({
-        Bucket: STORAGE_BUCKET,
-        Key: file.objectKey,
-      }),
+    publishStorageDeletion(
+      deletionJob.id
     );
   } catch (error) {
-    console.error(`B2 deletion failed for ${file.objectKey}:`, error);
+    /*
+      Don't undo the delete.
 
-    throw new AppError("Unable to delete file from storage", 502);
+      StorageDeletionJob is still PENDING
+      in PostgreSQL.
+
+      Our recovery job will later find
+      and republish it.
+    */
+    console.error(
+      `Failed to publish storage deletion job ${deletionJob.id}:`,
+      error
+    );
   }
 
-  // Only update DB after storage deletion succeeds
-  await prisma.$transaction([
-    prisma.file.delete({
-      where: {
-        id: file.id,
-      },
-    }),
+  return {
+    deletionJobId:
+      deletionJob.id,
 
-    prisma.user.update({
-      where: {
-        id: userId,
-      },
-
-      data: {
-        storageUsed: {
-          decrement: file.size,
-        },
-      },
-    }),
-  ]);
-
-  return true;
+    message:
+      "File scheduled for permanent deletion",
+  };
 }
-
 
 // ==================== GLOBAL EXPIRED RESERVATION CLEANUP ====================
 

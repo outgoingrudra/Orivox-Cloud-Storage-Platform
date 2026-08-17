@@ -9,7 +9,9 @@ import {
 } from "./config/rabbitmq.js";
 
 import { startEmailWorker } from "./workers/email.worker.js";
-
+import {
+  startStorageDeletionWorker,
+} from "./workers/storageDeletion.worker.js";
 const PORT = process.env.PORT || 5000;
 
 let server;
@@ -21,6 +23,7 @@ async function startServer() {
 
     await connectRabbitMQ();
     await startEmailWorker();
+    await startStorageDeletionWorker();
 
     server = app.listen(PORT, () => {
       console.log(`Orivox API running on port ${PORT} 🚀`);

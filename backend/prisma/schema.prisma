@@ -277,3 +277,36 @@ model FolderShareLink {
   @@index([createdById])
   @@index([expiresAt])
 }
+
+
+enum DeletionJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model StorageDeletionJob {
+  id String @id @default(cuid())
+
+  userId String
+
+  objectKey String
+  fileId    String?
+
+  size BigInt
+
+  status DeletionJobStatus @default(PENDING)
+
+  attempts Int @default(0)
+
+  lastError String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  completedAt DateTime?
+
+  @@index([status])
+  @@index([userId])
+  @@index([createdAt])
+}
