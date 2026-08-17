@@ -21,6 +21,9 @@ import {
   PERMISSION,
 } from "../share/share.permission.js";
 import { publishStorageDeletion } from "./file.publisher.js";
+import {
+  getValidRestoreParent,
+} from "../folder/folder.helper.js";
 
 import { AppError } from "../../utils/AppError.js";
 
@@ -884,8 +887,10 @@ export async function trashFile({ fileId, userId }) {
 
   return file;
 }
-
-export const restoreFile = async ({ fileId, userId }) => {
+export async function restoreFile({
+  fileId,
+  userId,
+}) {
   await requireFilePermission({
     fileId,
     userId,
@@ -893,72 +898,65 @@ export const restoreFile = async ({ fileId, userId }) => {
     allowTrashed: true,
   });
 
-  const file = await prisma.file.findUnique({
-    where: {
-      id: fileId,
-    },
-  });
+  const file =
+    await prisma.file.findUnique({
+      where: {
+        id: fileId,
+      },
+    });
 
   if (!file) {
-    throw new AppError("File not found", 404);
+    throw new AppError(
+      "File not found",
+      404
+    );
   }
+
   if (!file.isTrashed) {
-    throw new AppError("File is not in trash", 400);
+    throw new AppError(
+      "File is not in trash",
+      400
+    );
   }
 
-  let folderId = file.folderId;
+  // Check the entire folder ancestor chain.
+  //
+  // If original folder or ANY ancestor is
+  // unavailable/trashed, restore file to root.
+  const folderId =
+    await getValidRestoreParent({
+      parentId: file.folderId,
+      userId,
+    });
 
-  /*
-    Original folder may itself have
-    been moved to trash.
-
-    In that case restore file to root.
-  */
-
-  if (folderId) {
-    const folder = await prisma.folder.findFirst({
+  const restored =
+    await prisma.file.update({
       where: {
-        id: folderId,
-        userId,
+        id: fileId,
+      },
+
+      data: {
+        isTrashed: false,
+        trashedAt: null,
+        folderId,
       },
 
       select: {
         id: true,
+        name: true,
+        mimeType: true,
+        size: true,
+        folderId: true,
         isTrashed: true,
       },
     });
-
-    if (!folder || folder.isTrashed) {
-      folderId = null;
-    }
-  }
-
-  const restored = await prisma.file.update({
-    where: {
-      id: fileId,
-    },
-
-    data: {
-      isTrashed: false,
-      trashedAt: null,
-      folderId,
-    },
-
-    select: {
-      id: true,
-      name: true,
-      mimeType: true,
-      size: true,
-      folderId: true,
-      isTrashed: true,
-    },
-  });
 
   return {
     ...restored,
     size: Number(restored.size),
   };
-};
+}
+
 
 export async function permanentlyDeleteFile({ fileId, userId }) {
   // ==================== OWNER PERMISSION ====================

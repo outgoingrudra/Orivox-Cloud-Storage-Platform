@@ -349,8 +349,7 @@ export const publicFileDownloadController = asyncHandler(async (req, res) => {
     });
   });
 
-export const publicFolderContentsController =
-  asyncHandler(async (req, res) => {
+export const publicFolderContentsController =asyncHandler(async (req, res) => {
     const data =
       await getPublicFolderContents({
         token:

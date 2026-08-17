@@ -106,3 +106,46 @@ export const validateActiveFolder = async (
     userId
   );
 };
+
+
+export async function getValidRestoreParent({
+  parentId,
+  userId,
+}) {
+  if (!parentId) {
+    return null;
+  }
+
+  let currentId = parentId;
+
+  while (currentId) {
+    const folder = await prisma.folder.findFirst({
+      where: {
+        id: currentId,
+        userId,
+      },
+
+      select: {
+        id: true,
+        parentId: true,
+        isTrashed: true,
+      },
+    });
+
+    // Broken hierarchy
+    if (!folder) {
+      return null;
+    }
+
+    // Any trashed ancestor means original
+    // location is not currently usable.
+    if (folder.isTrashed) {
+      return null;
+    }
+
+    currentId = folder.parentId;
+  }
+
+  // Whole ancestor chain is active
+  return parentId;
+}

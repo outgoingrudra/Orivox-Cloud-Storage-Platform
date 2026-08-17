@@ -3,6 +3,7 @@ import { AppError } from "../../utils/AppError.js";
 
 import {
   findOwnedFolder,
+  getValidRestoreParent
 } from "./folder.helper.js";
 
 import {
@@ -23,38 +24,87 @@ import {
 } from "../file/file.publisher.js";
 
 
-export const createFolder = async ({
+export async function createFolder({
   name,
   parentId,
   userId,
-}) => {
+}) {
+  // Root folder belongs to the current user by default
+  let ownerId = userId;
+
+  // ==================== NESTED FOLDER ====================
+
   if (parentId) {
-    await findOwnedFolder(
-      parentId,
-      userId
-    );
+    // OWNER or EDITOR can create inside this folder
+    await requireFolderPermission({
+      folderId: parentId,
+      userId,
+      minimum: PERMISSION.EDITOR,
+    });
+
+    const parentFolder =
+      await prisma.folder.findUnique({
+        where: {
+          id: parentId,
+        },
+
+        select: {
+          id: true,
+          userId: true,
+        },
+      });
+
+    if (!parentFolder) {
+      throw new AppError(
+        "Parent folder not found",
+        404
+      );
+    }
+
+    /*
+      Important:
+
+      New child inherits the OWNER of the parent tree.
+
+      Example:
+
+      Rudra owns Projects
+      John is EDITOR
+
+      John creates:
+      Projects/Backend
+
+      Backend owner = Rudra
+      NOT John.
+    */
+    ownerId = parentFolder.userId;
   }
 
-  const folder = await prisma.folder.create({
-    data: {
-      name,
-      userId,
-      parentId: parentId || null,
-    },
+  // ==================== CREATE ====================
 
-    select: {
-      id: true,
-      name: true,
-      parentId: true,
-      isTrashed: true,
-      createdAt: true,
-      updatedAt: true,
-    },
-  });
+  const folder =
+    await prisma.folder.create({
+      data: {
+        name,
+
+        userId: ownerId,
+
+        parentId:
+          parentId || null,
+      },
+
+      select: {
+        id: true,
+        name: true,
+        parentId: true,
+        isTrashed: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
 
   return folder;
-};
-
+}
 export async function listFolders({
   userId,
   parentId,
@@ -330,24 +380,23 @@ export async function trashFolder({
     },
   });
 }
-
 export async function restoreFolder({
   folderId,
   userId,
 }) {
-
   await requireFolderPermission({
-  folderId,
-  userId,
-  minimum: PERMISSION.OWNER,
-  allowTrashed: true,
-});
-
-  const folder = await prisma.folder.findUnique({
-    where: {
-      id: folderId,
-    },
+    folderId,
+    userId,
+    minimum: PERMISSION.OWNER,
+    allowTrashed: true,
   });
+
+  const folder =
+    await prisma.folder.findUnique({
+      where: {
+        id: folderId,
+      },
+    });
 
   if (!folder) {
     throw new AppError(
@@ -363,30 +412,14 @@ export async function restoreFolder({
     );
   }
 
-  let parentId = folder.parentId;
-
-  if (parentId) {
-    const parent =
-      await prisma.folder.findUnique({
-        where: {
-          id: parentId,
-        },
-
-        select: {
-          id: true,
-          userId: true,
-          isTrashed: true,
-        },
-      });
-
-    if (
-      !parent ||
-      parent.userId !== userId ||
-      parent.isTrashed
-    ) {
-      parentId = null;
-    }
-  }
+  // Check entire ancestor chain.
+  // If any ancestor is trashed/missing,
+  // restore this folder to root.
+  const parentId =
+    await getValidRestoreParent({
+      parentId: folder.parentId,
+      userId,
+    });
 
   return prisma.folder.update({
     where: {
@@ -408,6 +441,7 @@ export async function restoreFolder({
     },
   });
 }
+
 export const listTrashedFolders = async ({
     userId,
     page,
