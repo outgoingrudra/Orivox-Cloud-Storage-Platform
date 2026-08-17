@@ -335,11 +335,13 @@ export async function restoreFolder({
   folderId,
   userId,
 }) {
+
   await requireFolderPermission({
-    folderId,
-    userId,
-    minimum: PERMISSION.OWNER,
-  });
+  folderId,
+  userId,
+  minimum: PERMISSION.OWNER,
+  allowTrashed: true,
+});
 
   const folder = await prisma.folder.findUnique({
     where: {
@@ -503,12 +505,12 @@ export async function permanentlyDeleteFolder({
   userId,
 }) {
   // ==================== OWNER ONLY ====================
-
-  await requireFolderPermission({
-    folderId,
-    userId,
-    minimum: PERMISSION.OWNER,
-  });
+await requireFolderPermission({
+  folderId,
+  userId,
+  minimum: PERMISSION.OWNER,
+  allowTrashed: true,
+});
 
   const folder = await prisma.folder.findUnique({
     where: {

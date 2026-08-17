@@ -1,5 +1,6 @@
 import prisma from "../../config/prisma.js";
 import { AppError } from "../../utils/AppError.js";
+
 // ==================== PERMISSION CONSTANTS ====================
 
 export const PERMISSION = {
@@ -25,37 +26,106 @@ function strongerPermission(a, b) {
     : b;
 }
 
+// ==================== CHECK FOLDER ANCESTORS ====================
+
+async function validateFolderHierarchy({
+  folder,
+  allowTrashed,
+}) {
+  // Current folder itself
+  if (!allowTrashed && folder.isTrashed) {
+    return false;
+  }
+
+  let parentId = folder.parentId;
+
+  while (parentId) {
+    const parent =
+      await prisma.folder.findUnique({
+        where: {
+          id: parentId,
+        },
+
+        select: {
+          id: true,
+          userId: true,
+          parentId: true,
+          isTrashed: true,
+        },
+      });
+
+    if (!parent) {
+      return false;
+    }
+
+    // Folder tree should never cross owners
+    if (parent.userId !== folder.userId) {
+      return false;
+    }
+
+    // Normal operations cannot access anything
+    // hidden under a trashed ancestor.
+    if (!allowTrashed && parent.isTrashed) {
+      return false;
+    }
+
+    parentId = parent.parentId;
+  }
+
+  return true;
+}
+
 // ==================== FOLDER PERMISSION ====================
 
 export async function getFolderPermission({
   folderId,
   userId,
+  allowTrashed = false,
 }) {
-  const folder = await prisma.folder.findUnique({
-    where: {
-      id: folderId,
-    },
+  const folder =
+    await prisma.folder.findUnique({
+      where: {
+        id: folderId,
+      },
 
-    select: {
-      id: true,
-      userId: true,
-      parentId: true,
-      isTrashed: true,
-    },
-  });
+      select: {
+        id: true,
+        userId: true,
+        parentId: true,
+        isTrashed: true,
+      },
+    });
 
   if (!folder) {
     return PERMISSION.NONE;
   }
 
-  // Owner always has full permission
-  if (folder.userId === userId) {
-    return PERMISSION.OWNER;
+  // ==================== TRASH / HIERARCHY CHECK ====================
+
+  const hierarchyValid =
+    await validateFolderHierarchy({
+      folder,
+      allowTrashed,
+    });
+
+  if (!hierarchyValid) {
+    return PERMISSION.NONE;
   }
 
-  // Trashed resources aren't accessible through sharing
-  if (folder.isTrashed) {
-    return PERMISSION.NONE;
+  // ==================== OWNER ====================
+
+  /*
+    Important:
+    Owner check happens AFTER trash/hierarchy validation.
+
+    Therefore normal operations cannot access
+    a trashed folder just because the requester owns it.
+
+    restore/delete can explicitly pass:
+    allowTrashed: true
+  */
+  if (folder.userId === userId) {
+    return PERMISSION.OWNER;
   }
 
   let permission = PERMISSION.NONE;
@@ -83,21 +153,7 @@ export async function getFolderPermission({
     );
   }
 
-  /*
-    Now walk upward.
-
-    Example:
-
-    Projects       ← shared with John as EDITOR
-      └── Backend
-          └── API
-
-    John accesses API.
-
-    API has no direct share.
-    Backend has no direct share.
-    Projects does → EDITOR.
-  */
+  // ==================== ANCESTOR SHARES ====================
 
   let parentId = folder.parentId;
 
@@ -120,16 +176,11 @@ export async function getFolderPermission({
       return PERMISSION.NONE;
     }
 
-    // Hidden because an ancestor is in trash
-    if (parent.isTrashed) {
+    if (parent.userId !== folder.userId) {
       return PERMISSION.NONE;
     }
 
-    /*
-      Safety check:
-      hierarchy should never cross owners.
-    */
-    if (parent.userId !== folder.userId) {
+    if (!allowTrashed && parent.isTrashed) {
       return PERMISSION.NONE;
     }
 
@@ -165,31 +216,76 @@ export async function getFolderPermission({
 export async function getFilePermission({
   fileId,
   userId,
+  allowTrashed = false,
 }) {
-  const file = await prisma.file.findUnique({
-    where: {
-      id: fileId,
-    },
+  const file =
+    await prisma.file.findUnique({
+      where: {
+        id: fileId,
+      },
 
-    select: {
-      id: true,
-      userId: true,
-      folderId: true,
-      isTrashed: true,
-    },
-  });
+      select: {
+        id: true,
+        userId: true,
+        folderId: true,
+        isTrashed: true,
+      },
+    });
 
   if (!file) {
     return PERMISSION.NONE;
   }
 
-  // Owner
-  if (file.userId === userId) {
-    return PERMISSION.OWNER;
+  // File itself is in trash
+  if (!allowTrashed && file.isTrashed) {
+    return PERMISSION.NONE;
   }
 
-  if (file.isTrashed) {
-    return PERMISSION.NONE;
+  /*
+    If file lives inside a folder, check whether
+    the folder or one of its ancestors is trashed.
+
+    This check happens BEFORE returning OWNER.
+  */
+  if (file.folderId) {
+    const folder =
+      await prisma.folder.findUnique({
+        where: {
+          id: file.folderId,
+        },
+
+        select: {
+          id: true,
+          userId: true,
+          parentId: true,
+          isTrashed: true,
+        },
+      });
+
+    if (!folder) {
+      return PERMISSION.NONE;
+    }
+
+    // File/folder ownership hierarchy should be consistent
+    if (folder.userId !== file.userId) {
+      return PERMISSION.NONE;
+    }
+
+    const hierarchyValid =
+      await validateFolderHierarchy({
+        folder,
+        allowTrashed,
+      });
+
+    if (!hierarchyValid) {
+      return PERMISSION.NONE;
+    }
+  }
+
+  // ==================== OWNER ====================
+
+  if (file.userId === userId) {
+    return PERMISSION.OWNER;
   }
 
   let permission = PERMISSION.NONE;
@@ -217,7 +313,7 @@ export async function getFilePermission({
     );
   }
 
-  // Root-level file has no folder inheritance
+  // Root-level file has no inherited folder permission
   if (!file.folderId) {
     return permission;
   }
@@ -228,19 +324,8 @@ export async function getFilePermission({
     await getFolderPermission({
       folderId: file.folderId,
       userId,
+      allowTrashed,
     });
-
-  /*
-    OWNER here would mean user owns folder,
-    but file owner should normally match folder owner.
-
-    For a shared user, folderPermission will usually
-    be VIEWER / EDITOR / NONE.
-  */
-
-  if (folderPermission === PERMISSION.OWNER) {
-    return PERMISSION.OWNER;
-  }
 
   return strongerPermission(
     permission,
@@ -248,18 +333,19 @@ export async function getFilePermission({
   );
 }
 
-
 // ==================== REQUIRE FILE PERMISSION ====================
 
 export async function requireFilePermission({
   fileId,
   userId,
   minimum = PERMISSION.VIEWER,
+  allowTrashed = false,
 }) {
   const permission =
     await getFilePermission({
       fileId,
       userId,
+      allowTrashed,
     });
 
   if (
@@ -281,11 +367,13 @@ export async function requireFolderPermission({
   folderId,
   userId,
   minimum = PERMISSION.VIEWER,
+  allowTrashed = false,
 }) {
   const permission =
     await getFolderPermission({
       folderId,
       userId,
+      allowTrashed,
     });
 
   if (
