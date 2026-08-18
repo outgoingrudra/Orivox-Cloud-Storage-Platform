@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+
 import {
   Archive,
   ChevronDown,
+  ChevronRight,
   File,
   FileAudio,
   FileImage,
@@ -11,6 +14,7 @@ import {
   FileVideo,
   Folder,
   Grid2X2,
+  Home,
   List,
   LoaderCircle,
   MoreVertical,
@@ -23,6 +27,7 @@ import {
 import { motion } from "framer-motion";
 
 import { useExplorer } from "@/features/files/useExplorer";
+import { useFolderDetails } from "@/features/files/useFolderDetails";
 
 function formatBytes(bytes = 0) {
   if (!bytes) return "0 B";
@@ -63,20 +68,22 @@ function getFileIcon(mimeType = "") {
 }
 
 export default function FilesPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const folderId = searchParams.get("folder");
+
   const [search, setSearch] = useState("");
   const [type, setType] = useState("");
   const [sortBy, setSortBy] = useState("name");
   const [order, setOrder] = useState("asc");
   const [view, setView] = useState("grid");
 
-  const {
-    data,
-    isLoading,
-    isFetching,
-    isError,
-    error,
-    refetch,
-  } = useExplorer({
+  const { data: folderDetails, isLoading: folderDetailsLoading } =
+    useFolderDetails(folderId);
+
+  const { data, isLoading, isFetching, isError, error, refetch } = useExplorer({
+    folderId,
     search,
     type,
     sortBy,
@@ -86,11 +93,32 @@ export default function FilesPage() {
   const itemsCount = useMemo(() => {
     if (!data) return 0;
 
-    return (
-      data.folders.length +
-      data.files.length
-    );
+    return data.folders.length + data.files.length;
   }, [data]);
+
+  function openFolder(id) {
+    /*
+      Reset explorer-specific filters when
+      entering another folder.
+
+      Keeps navigation predictable.
+    */
+    setSearch("");
+    setType("");
+
+    router.push(`/files?folder=${encodeURIComponent(id)}`);
+  }
+
+  function goToRoot() {
+    setSearch("");
+    setType("");
+
+    router.push("/files");
+  }
+
+  // =====================================================
+  // LOADING
+  // =====================================================
 
   if (isLoading) {
     return (
@@ -100,18 +128,17 @@ export default function FilesPage() {
           animate={{ opacity: 1, scale: 1 }}
           className="flex flex-col items-center gap-3"
         >
-          <LoaderCircle
-            size={30}
-            className="animate-spin"
-          />
+          <LoaderCircle size={30} className="animate-spin" />
 
-          <p className="text-sm opacity-45">
-            Loading your files...
-          </p>
+          <p className="text-sm opacity-45">Loading your files...</p>
         </motion.div>
       </div>
     );
   }
+
+  // =====================================================
+  // ERROR
+  // =====================================================
 
   if (isError) {
     return (
@@ -120,9 +147,7 @@ export default function FilesPage() {
         animate={{ opacity: 1, y: 0 }}
         className="mx-auto mt-16 max-w-lg rounded-2xl border border-error/30 bg-error/5 p-6 text-center"
       >
-        <h2 className="text-lg font-bold">
-          Unable to load files
-        </h2>
+        <h2 className="text-lg font-bold">Unable to load files</h2>
 
         <p className="mt-2 text-sm opacity-60">
           {error?.response?.data?.message ||
@@ -130,6 +155,7 @@ export default function FilesPage() {
         </p>
 
         <button
+          type="button"
           onClick={() => refetch()}
           className="btn btn-neutral btn-sm mt-5 rounded-xl"
         >
@@ -144,7 +170,9 @@ export default function FilesPage() {
 
   return (
     <div className="mx-auto max-w-7xl">
-      {/* ==================== HEADER ==================== */}
+      {/* =====================================================
+          HEADER
+      ===================================================== */}
 
       <motion.section
         initial={{ opacity: 0, y: 18 }}
@@ -158,11 +186,12 @@ export default function FilesPage() {
           </p>
 
           <h1 className="mt-2 text-3xl font-black tracking-[-0.035em] sm:text-4xl">
-            My Files
+            {folderDetails?.folder?.name || "My Files"}
           </h1>
 
           <p className="mt-2 text-sm opacity-55">
-            {itemsCount} item{itemsCount === 1 ? "" : "s"} in this folder.
+            {itemsCount} item
+            {itemsCount === 1 ? "" : "s"} in this folder.
           </p>
         </div>
 
@@ -189,16 +218,90 @@ export default function FilesPage() {
         </div>
       </motion.section>
 
-      {/* ==================== TOOLBAR ==================== */}
+      {/* =====================================================
+          BREADCRUMBS
+      ===================================================== */}
+
+      <motion.nav
+        initial={{ opacity: 0, x: -12 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: 0.05 }}
+        aria-label="Folder breadcrumb"
+        className="mt-6 flex items-center gap-1 overflow-x-auto pb-1 text-sm"
+      >
+        <motion.button
+          type="button"
+          whileHover={{ y: -1 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={goToRoot}
+          className={`
+            flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5
+            font-medium transition
+            ${
+              !folderId
+                ? "bg-base-200 opacity-100"
+                : "opacity-55 hover:bg-base-200 hover:opacity-100"
+            }
+          `}
+        >
+          <Home size={15} />
+          My Files
+        </motion.button>
+
+        {folderId && folderDetailsLoading && (
+          <>
+            <ChevronRight size={14} className="shrink-0 opacity-30" />
+
+            <span className="loading loading-dots loading-xs" />
+          </>
+        )}
+
+        {folderDetails?.path?.map((folder) => {
+          const current = folder.id === folderId;
+
+          return (
+            <div key={folder.id} className="flex shrink-0 items-center gap-1">
+              <ChevronRight size={14} className="opacity-30" />
+
+              <motion.button
+                type="button"
+                whileHover={{
+                  y: current ? 0 : -1,
+                }}
+                whileTap={{
+                  scale: 0.96,
+                }}
+                onClick={() => {
+                  if (!current) {
+                    openFolder(folder.id);
+                  }
+                }}
+                className={`
+                  rounded-lg px-2 py-1.5 transition
+                  ${
+                    current
+                      ? "cursor-default bg-base-200 font-semibold opacity-100"
+                      : "font-medium opacity-55 hover:bg-base-200 hover:opacity-100"
+                  }
+                `}
+              >
+                {folder.name}
+              </motion.button>
+            </div>
+          );
+        })}
+      </motion.nav>
+
+      {/* =====================================================
+          TOOLBAR
+      ===================================================== */}
 
       <motion.section
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.08 }}
-        className="mt-7 flex flex-col gap-3 rounded-2xl border border-base-300 bg-base-100 p-3 lg:flex-row lg:items-center"
+        className="mt-5 flex flex-col gap-3 rounded-2xl border border-base-300 bg-base-100 p-3 lg:flex-row lg:items-center"
       >
-        {/* Search */}
-
         <div className="relative flex-1">
           <Search
             size={18}
@@ -207,80 +310,46 @@ export default function FilesPage() {
 
           <input
             value={search}
-            onChange={(event) =>
-              setSearch(event.target.value)
-            }
+            onChange={(event) => setSearch(event.target.value)}
             placeholder="Search this folder..."
             className="input input-bordered h-10 w-full rounded-xl bg-base-200/60 pl-11"
           />
         </div>
 
-        {/* Type */}
-
         <select
           value={type}
-          onChange={(event) =>
-            setType(event.target.value)
-          }
+          onChange={(event) => setType(event.target.value)}
           className="select select-bordered h-10 min-h-0 rounded-xl"
         >
-          <option value="">
-            All types
-          </option>
-          <option value="image">
-            Images
-          </option>
-          <option value="video">
-            Videos
-          </option>
-          <option value="audio">
-            Audio
-          </option>
-          <option value="document">
-            Documents
-          </option>
-          <option value="archive">
-            Archives
-          </option>
-          <option value="other">
-            Other
-          </option>
+          <option value="">All types</option>
+          <option value="image">Images</option>
+          <option value="video">Videos</option>
+          <option value="audio">Audio</option>
+          <option value="document">Documents</option>
+          <option value="archive">Archives</option>
+          <option value="other">Other</option>
         </select>
-
-        {/* Sort */}
 
         <select
           value={sortBy}
-          onChange={(event) =>
-            setSortBy(event.target.value)
-          }
+          onChange={(event) => setSortBy(event.target.value)}
           className="select select-bordered h-10 min-h-0 rounded-xl"
         >
-          <option value="name">
-            Name
-          </option>
-          <option value="createdAt">
-            Created
-          </option>
-          <option value="updatedAt">
-            Updated
-          </option>
+          <option value="name">Name</option>
+
+          <option value="createdAt">Created</option>
+
+          <option value="updatedAt">Updated</option>
         </select>
 
         <button
           type="button"
           onClick={() =>
-            setOrder((value) =>
-              value === "asc"
-                ? "desc"
-                : "asc"
-            )
+            setOrder((value) => (value === "asc" ? "desc" : "asc"))
           }
           className="btn btn-outline h-10 min-h-0 rounded-xl"
         >
-          {order === "asc"
-            ? "Ascending"
-            : "Descending"}
+          {order === "asc" ? "Ascending" : "Descending"}
 
           <ChevronDown
             size={15}
@@ -292,18 +361,13 @@ export default function FilesPage() {
           />
         </button>
 
-        {/* View toggle */}
-
         <div className="flex rounded-xl border border-base-300 p-1">
           <button
             type="button"
-            onClick={() =>
-              setView("grid")
-            }
+            onClick={() => setView("grid")}
+            aria-label="Grid view"
             className={`btn btn-sm btn-square rounded-lg ${
-              view === "grid"
-                ? "btn-neutral"
-                : "btn-ghost"
+              view === "grid" ? "btn-neutral" : "btn-ghost"
             }`}
           >
             <Grid2X2 size={16} />
@@ -311,13 +375,10 @@ export default function FilesPage() {
 
           <button
             type="button"
-            onClick={() =>
-              setView("list")
-            }
+            onClick={() => setView("list")}
+            aria-label="List view"
             className={`btn btn-sm btn-square rounded-lg ${
-              view === "list"
-                ? "btn-neutral"
-                : "btn-ghost"
+              view === "list" ? "btn-neutral" : "btn-ghost"
             }`}
           >
             <List size={17} />
@@ -325,29 +386,42 @@ export default function FilesPage() {
         </div>
       </motion.section>
 
-      {/* Fetching indicator */}
+      {/* =====================================================
+          FETCH INDICATOR
+      ===================================================== */}
 
       {isFetching && (
         <div className="mt-3 flex items-center gap-2 text-xs opacity-40">
-          <LoaderCircle
-            size={13}
-            className="animate-spin"
-          />
+          <LoaderCircle size={13} className="animate-spin" />
           Updating results...
         </div>
       )}
 
-      {/* ==================== EMPTY ==================== */}
+      {/* =====================================================
+          EMPTY STATE
+      ===================================================== */}
 
       {itemsCount === 0 ? (
         <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
-          animate={{ opacity: 1, scale: 1 }}
+          initial={{
+            opacity: 0,
+            scale: 0.96,
+          }}
+          animate={{
+            opacity: 1,
+            scale: 1,
+          }}
           className="mt-10 flex min-h-80 flex-col items-center justify-center rounded-2xl border border-dashed border-base-300 bg-base-100 p-8 text-center"
         >
           <motion.div
-            initial={{ rotate: -10, scale: 0.85 }}
-            animate={{ rotate: 0, scale: 1 }}
+            initial={{
+              rotate: -10,
+              scale: 0.85,
+            }}
+            animate={{
+              rotate: 0,
+              scale: 1,
+            }}
             transition={{
               type: "spring",
               stiffness: 220,
@@ -358,41 +432,120 @@ export default function FilesPage() {
             <Folder size={27} />
           </motion.div>
 
-          <h2 className="mt-5 text-lg font-bold">
-            Nothing here yet
-          </h2>
+          <h2 className="mt-5 text-lg font-bold">Nothing here yet</h2>
 
           <p className="mt-2 max-w-sm text-sm opacity-50">
-            Create a folder or upload your first file to start organizing your workspace.
+            Create a folder or upload your first file to start organizing your
+            workspace.
           </p>
 
           <div className="mt-6 flex gap-2">
-            <button className="btn btn-outline btn-sm rounded-xl">
+            <button type="button" className="btn btn-outline btn-sm rounded-xl">
               <Plus size={15} />
               New folder
             </button>
 
-            <button className="btn btn-neutral btn-sm rounded-xl">
+            <button type="button" className="btn btn-neutral btn-sm rounded-xl">
               <Upload size={15} />
               Upload
             </button>
           </div>
         </motion.div>
       ) : view === "grid" ? (
-        /* ==================== GRID VIEW ==================== */
+        /* =====================================================
+            GRID VIEW
+        ===================================================== */
 
         <section className="mt-6">
           {folders.length > 0 && (
             <>
-              <h2 className="text-sm font-bold opacity-55">
-                Folders
+              <h2 className="text-sm font-bold opacity-55">Folders</h2>
+
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {folders.map((folder, index) => (
+                  <motion.article
+                    key={folder.id}
+                    initial={{
+                      opacity: 0,
+                      y: 18,
+                    }}
+                    animate={{
+                      opacity: 1,
+                      y: 0,
+                    }}
+                    transition={{
+                      delay: index * 0.04,
+                    }}
+                    whileHover={{
+                      y: -4,
+                      scale: 1.01,
+                    }}
+                    onDoubleClick={() => openFolder(folder.id)}
+                    className="group cursor-pointer rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm transition"
+                  >
+                    <div className="flex items-start justify-between">
+                      <motion.button
+                        type="button"
+                        whileHover={{
+                          scale: 1.08,
+                          rotate: -3,
+                        }}
+                        whileTap={{
+                          scale: 0.95,
+                        }}
+                        onClick={() => openFolder(folder.id)}
+                        className="flex h-11 w-11 items-center justify-center rounded-xl bg-base-200"
+                        aria-label={`Open ${folder.name}`}
+                      >
+                        <Folder size={21} />
+                      </motion.button>
+
+                      <button
+                        type="button"
+                        onClick={(event) => event.stopPropagation()}
+                        className="btn btn-ghost btn-circle btn-sm opacity-50 group-hover:opacity-100"
+                        aria-label={`Actions for ${folder.name}`}
+                      >
+                        <MoreVertical size={17} />
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => openFolder(folder.id)}
+                      className="mt-5 block w-full truncate text-left font-semibold hover:underline"
+                    >
+                      {folder.name}
+                    </button>
+
+                    <p className="mt-1 text-xs opacity-40">
+                      {folder._count?.folders ?? folder.folderCount ?? 0}{" "}
+                      folders • {folder._count?.files ?? folder.fileCount ?? 0}{" "}
+                      files
+                    </p>
+                  </motion.article>
+                ))}
+              </div>
+            </>
+          )}
+
+          {files.length > 0 && (
+            <>
+              <h2
+                className={`${
+                  folders.length ? "mt-8" : ""
+                } text-sm font-bold opacity-55`}
+              >
+                Files
               </h2>
 
               <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {folders.map(
-                  (folder, index) => (
+                {files.map((file, index) => {
+                  const Icon = getFileIcon(file.mimeType);
+
+                  return (
                     <motion.article
-                      key={folder.id}
+                      key={file.id}
                       initial={{
                         opacity: 0,
                         y: 18,
@@ -402,126 +555,50 @@ export default function FilesPage() {
                         y: 0,
                       }}
                       transition={{
-                        delay:
-                          index * 0.04,
+                        delay: index * 0.04,
                       }}
                       whileHover={{
                         y: -4,
                         scale: 1.01,
                       }}
-                      className="group cursor-pointer rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm transition"
+                      className="group rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-base-200">
-                          <Folder
-                            size={21}
-                          />
+                          <Icon size={21} />
                         </div>
 
-                        <button className="btn btn-ghost btn-circle btn-sm opacity-50 group-hover:opacity-100">
-                          <MoreVertical
-                            size={17}
-                          />
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-circle btn-sm opacity-50 group-hover:opacity-100"
+                          aria-label={`Actions for ${file.name}`}
+                        >
+                          <MoreVertical size={17} />
                         </button>
                       </div>
 
-                      <p className="mt-5 truncate font-semibold">
-                        {folder.name}
-                      </p>
+                      <p className="mt-5 truncate font-semibold">{file.name}</p>
 
-                      <p className="mt-1 text-xs opacity-40">
-                        {folder._count?.folders ??
-                          folder.folderCount ??
-                          0}{" "}
-                        folders •{" "}
-                        {folder._count?.files ??
-                          folder.fileCount ??
-                          0}{" "}
-                        files
-                      </p>
+                      <div className="mt-1 flex gap-2 text-xs opacity-40">
+                        <span>{formatBytes(file.size)}</span>
+
+                        <span>•</span>
+
+                        <span>
+                          {new Date(file.updatedAt).toLocaleDateString()}
+                        </span>
+                      </div>
                     </motion.article>
-                  )
-                )}
-              </div>
-            </>
-          )}
-
-          {files.length > 0 && (
-            <>
-              <h2 className={`${folders.length ? "mt-8" : ""} text-sm font-bold opacity-55`}>
-                Files
-              </h2>
-
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-                {files.map(
-                  (file, index) => {
-                    const Icon =
-                      getFileIcon(
-                        file.mimeType
-                      );
-
-                    return (
-                      <motion.article
-                        key={file.id}
-                        initial={{
-                          opacity: 0,
-                          y: 18,
-                        }}
-                        animate={{
-                          opacity: 1,
-                          y: 0,
-                        }}
-                        transition={{
-                          delay:
-                            index * 0.04,
-                        }}
-                        whileHover={{
-                          y: -4,
-                          scale: 1.01,
-                        }}
-                        className="group rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-base-200">
-                            <Icon size={21} />
-                          </div>
-
-                          <button className="btn btn-ghost btn-circle btn-sm opacity-50 group-hover:opacity-100">
-                            <MoreVertical
-                              size={17}
-                            />
-                          </button>
-                        </div>
-
-                        <p className="mt-5 truncate font-semibold">
-                          {file.name}
-                        </p>
-
-                        <div className="mt-1 flex gap-2 text-xs opacity-40">
-                          <span>
-                            {formatBytes(
-                              file.size
-                            )}
-                          </span>
-
-                          <span>•</span>
-
-                          <span>
-                            {new Date(
-                              file.updatedAt
-                            ).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </motion.article>
-                    );
-                  }
-                )}
+                  );
+                })}
               </div>
             </>
           )}
         </section>
       ) : (
-        /* ==================== LIST VIEW ==================== */
+        /* =====================================================
+            LIST VIEW
+        ===================================================== */
 
         <motion.section
           initial={{ opacity: 0 }}
@@ -530,81 +607,85 @@ export default function FilesPage() {
         >
           <div className="grid grid-cols-[1fr_auto] border-b border-base-300 px-5 py-3 text-xs font-bold uppercase tracking-wide opacity-40 sm:grid-cols-[1fr_120px_130px_40px]">
             <span>Name</span>
-            <span className="hidden sm:block">
-              Size
-            </span>
-            <span className="hidden sm:block">
-              Modified
-            </span>
+
+            <span className="hidden sm:block">Size</span>
+
+            <span className="hidden sm:block">Modified</span>
+
             <span />
           </div>
 
-          {[...folders, ...files].map(
-            (item, index) => {
-              const isFolder =
-                !item.mimeType;
+          {[...folders, ...files].map((item, index) => {
+            const isFolder = !item.mimeType;
 
-              const Icon = isFolder
-                ? Folder
-                : getFileIcon(
-                    item.mimeType
-                  );
+            const Icon = isFolder ? Folder : getFileIcon(item.mimeType);
 
-              return (
-                <motion.div
-                  key={item.id}
-                  initial={{
-                    opacity: 0,
-                    x: -12,
-                  }}
-                  animate={{
-                    opacity: 1,
-                    x: 0,
-                  }}
-                  transition={{
-                    delay:
-                      index * 0.035,
-                  }}
-                  whileHover={{
-                    x: 3,
-                    backgroundColor:
-                      "var(--color-base-200)",
-                  }}
-                  className="grid grid-cols-[1fr_auto] items-center gap-4 border-b border-base-300 px-5 py-3.5 last:border-b-0 sm:grid-cols-[1fr_120px_130px_40px]"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-base-200">
-                      <Icon size={17} />
-                    </div>
+            return (
+              <motion.div
+                key={item.id}
+                initial={{
+                  opacity: 0,
+                  x: -12,
+                }}
+                animate={{
+                  opacity: 1,
+                  x: 0,
+                }}
+                transition={{
+                  delay: index * 0.035,
+                }}
+                whileHover={{
+                  x: 3,
+                  backgroundColor: "var(--color-base-200)",
+                }}
+                onDoubleClick={() => {
+                  if (isFolder) {
+                    openFolder(item.id);
+                  }
+                }}
+                className={`grid grid-cols-[1fr_auto] items-center gap-4 border-b border-base-300 px-5 py-3.5 last:border-b-0 sm:grid-cols-[1fr_120px_130px_40px] ${
+                  isFolder ? "cursor-pointer" : ""
+                }`}
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-base-200">
+                    <Icon size={17} />
+                  </div>
 
+                  {isFolder ? (
+                    <button
+                      type="button"
+                      onClick={() => openFolder(item.id)}
+                      className="truncate text-left text-sm font-semibold hover:underline"
+                    >
+                      {item.name}
+                    </button>
+                  ) : (
                     <p className="truncate text-sm font-semibold">
                       {item.name}
                     </p>
-                  </div>
+                  )}
+                </div>
 
-                  <span className="hidden text-xs opacity-45 sm:block">
-                    {isFolder
-                      ? "—"
-                      : formatBytes(
-                          item.size
-                        )}
-                  </span>
+                <span className="hidden text-xs opacity-45 sm:block">
+                  {isFolder ? "—" : formatBytes(item.size)}
+                </span>
 
-                  <span className="hidden text-xs opacity-45 sm:block">
-                    {new Date(
-                      item.updatedAt
-                    ).toLocaleDateString()}
-                  </span>
+                <span className="hidden text-xs opacity-45 sm:block">
+                  {new Date(item.updatedAt).toLocaleDateString()}
+                </span>
 
-                  <button className="btn btn-ghost btn-circle btn-sm">
-                    <MoreVertical
-                      size={17}
-                    />
-                  </button>
-                </motion.div>
-              );
-            }
-          )}
+                <button
+                  type="button"
+                  onClick={(event) => event.stopPropagation()}
+                  className="btn btn-ghost btn-circle btn-sm"
+                  aria-label={`Actions for ${item.name}`}
+                >
+                  <MoreVertical size={17} />
+                </button>
+              </motion.div>
+            );
+          })}
         </motion.section>
       )}
     </div>
