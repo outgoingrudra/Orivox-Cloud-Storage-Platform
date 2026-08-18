@@ -21,6 +21,22 @@ export const api = axios.create({
 
 let refreshPromise = null;
 
+/*
+  These routes may legitimately return 401
+  because of wrong credentials / invalid token.
+
+  In those cases we should NOT try to refresh
+  the current session.
+*/
+const NO_REFRESH_ROUTES = [
+  "/auth/login",
+  "/auth/register",
+  "/auth/forgot-password",
+  "/auth/reset-password",
+  "/auth/resend-verification",
+  "/auth/verify-email",
+];
+
 // ==================== REQUEST INTERCEPTOR ====================
 
 api.interceptors.request.use(
@@ -35,6 +51,7 @@ api.interceptors.request.use(
 
     return config;
   },
+
   (error) =>
     Promise.reject(error)
 );
@@ -48,16 +65,44 @@ api.interceptors.response.use(
     const originalRequest =
       error.config;
 
+    /*
+      If Axios didn't create a normal
+      request config, don't try anything.
+    */
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
+
+    const shouldSkipRefresh =
+      NO_REFRESH_ROUTES.some(
+        (route) =>
+          originalRequest.url?.includes(
+            route
+          )
+      );
+
+    /*
+      Refresh only when:
+
+      1. Backend returned 401
+      2. We haven't already retried
+      3. This isn't a public auth request
+    */
     if (
       error.response?.status !== 401 ||
-      originalRequest?._retry
+      originalRequest._retry ||
+      shouldSkipRefresh
     ) {
       return Promise.reject(error);
     }
 
     /*
-      Don't try to refresh when the refresh
-      endpoint itself returns 401.
+      Never try to refresh the refresh request.
+
+      Otherwise:
+      refresh → 401
+      → refresh again
+      → infinite loop
     */
     if (
       originalRequest.url?.includes(
@@ -73,10 +118,15 @@ api.interceptors.response.use(
 
     try {
       /*
-        If 5 requests simultaneously get 401,
-        we should NOT send 5 refresh requests.
+        Suppose dashboard fires:
 
-        They all wait for the same promise.
+        /dashboard → 401
+        /files     → 401
+        /folders   → 401
+
+        We don't want 3 refresh requests.
+
+        All of them wait for this same promise.
       */
       if (!refreshPromise) {
         refreshPromise =
@@ -105,11 +155,25 @@ api.interceptors.response.use(
       const newAccessToken =
         await refreshPromise;
 
+      /*
+        Attach the new token to the
+        original failed request.
+      */
+      originalRequest.headers =
+        originalRequest.headers || {};
+
       originalRequest.headers.Authorization =
         `Bearer ${newAccessToken}`;
 
+      /*
+        Retry original request.
+      */
       return api(originalRequest);
     } catch (refreshError) {
+      /*
+        Refresh token/session itself
+        is no longer valid.
+      */
       clearAccessToken();
 
       return Promise.reject(
