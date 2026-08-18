@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes:
+    light --default,
+    dark,
+    cupcake,
+    retro,
+    garden,
+    forest,
+    luxury;
+}
+
+/* ==================== GLOBAL BASE ==================== */
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+}
+
+/* Keep Orivox feeling clean/premium by default */
+* {
+  scrollbar-width: thin;
+}
