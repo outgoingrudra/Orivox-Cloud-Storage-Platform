@@ -4,15 +4,15 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSelector } from "react-redux";
 import { LoaderCircle } from "lucide-react";
-
+import { motion } from "framer-motion";
 import Sidebar from "@/components/app/Sidebar";
 import Topbar from "@/components/app/Topbar";
 
 export default function AppLayout({ children }) {
   const router = useRouter();
   const status = useSelector((state) => state.auth.status);
-
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -33,17 +33,27 @@ export default function AppLayout({ children }) {
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((value) => !value)}
       />
 
-      <div className="lg:pl-72">
-        <Topbar
-          onMenuClick={() => setSidebarOpen(true)}
-        />
+      <motion.div
+        animate={{
+          paddingLeft: sidebarCollapsed ? 80 : 288,
+        }}
+        transition={{
+          type: "spring",
+          stiffness: 260,
+          damping: 28,
+        }}
+        className="min-h-screen max-lg:!pl-0"
+      >
+        <Topbar onMenuClick={() => setSidebarOpen(true)} />
 
         <main className="min-h-[calc(100vh-4rem)] px-4 py-6 sm:px-6 lg:px-8">
           {children}
         </main>
-      </div>
+      </motion.div>
     </div>
   );
 }
