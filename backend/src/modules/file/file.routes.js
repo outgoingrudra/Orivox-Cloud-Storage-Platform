@@ -15,7 +15,8 @@ import {
   downloadFileController,
   trashFileController,
   restoreFileController,
-  permanentlyDeleteFileController
+  permanentlyDeleteFileController,
+  listTrashedFilesController,
 } from "./file.controller.js";
 
 const router = Router();
@@ -59,6 +60,10 @@ router.patch(
 router.patch(
   "/:fileId/move",
   moveFileController
+);
+router.get(
+  "/trash",
+  listTrashedFilesController
 );
 
 router.get(

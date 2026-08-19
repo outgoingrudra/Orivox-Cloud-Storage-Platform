@@ -1136,3 +1136,66 @@ export async function cleanupAllExpiredReservations() {
 
   return cleaned;
 }
+
+
+export async function listTrashedFiles({
+  userId,
+  page,
+  limit,
+}) {
+  const skip = (page - 1) * limit;
+
+  const where = {
+    userId,
+    isTrashed: true,
+  };
+
+  const [files, total] =
+    await prisma.$transaction([
+      prisma.file.findMany({
+        where,
+
+        skip,
+        take: limit,
+
+        orderBy: {
+          trashedAt: "desc",
+        },
+
+        select: {
+          id: true,
+          name: true,
+          mimeType: true,
+          size: true,
+          folderId: true,
+          trashedAt: true,
+          createdAt: true,
+        },
+      }),
+
+      prisma.file.count({
+        where,
+      }),
+    ]);
+
+  return {
+    files: files.map((file) => ({
+      ...file,
+      size: Number(file.size),
+    })),
+
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages:
+        Math.ceil(total / limit),
+
+      hasNextPage:
+        page * limit < total,
+
+      hasPreviousPage:
+        page > 1,
+    },
+  };
+}

@@ -15,7 +15,8 @@ import {
   getFileDownloadUrl,
   trashFile,
   restoreFile,
-  permanentlyDeleteFile
+  permanentlyDeleteFile,
+  listTrashedFiles
 } from "./file.service.js";
 import {
   asyncHandler,
@@ -270,5 +271,32 @@ export const permanentlyDeleteFileController = asyncHandler(async (req, res) => 
     return res.status(200).json({
       success: true,
       message: "File permanently deleted",
+    });
+  });
+
+
+export const listTrashedFilesController =  asyncHandler(async (req, res) => {
+    const result =
+      listFilesSchema.safeParse(
+        req.query
+      );
+
+    if (!result.success) {
+      throw new AppError(
+        result.error.issues[0].message,
+        400
+      );
+    }
+
+    const data =
+      await listTrashedFiles({
+        userId: req.user.id,
+        page: result.data.page,
+        limit: result.data.limit,
+      });
+
+    return res.status(200).json({
+      success: true,
+      data,
     });
   });

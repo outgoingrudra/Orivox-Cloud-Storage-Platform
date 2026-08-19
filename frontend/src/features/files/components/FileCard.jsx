@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Download, LoaderCircle, MoreVertical } from "lucide-react";
+import { Download, LoaderCircle, MoreVertical, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-
+import { useTrashFile } from "@/features/files/useTrashFile";
 import { formatBytes, getFileIcon } from "../file.utils";
 import { useDownloadFile } from "@/features/files/useDownloadFile";
 
@@ -14,6 +14,7 @@ export default function FileCard({ file, index }) {
   const [error, setError] = useState("");
 
   const downloadMutation = useDownloadFile();
+  const trashMutation = useTrashFile();
 
   async function handleDownload() {
     if (downloadMutation.isPending) return;
@@ -21,10 +22,7 @@ export default function FileCard({ file, index }) {
     setError("");
 
     try {
-      const data =
-        await downloadMutation.mutateAsync(
-          file.id
-        );
+      const data = await downloadMutation.mutateAsync(file.id);
 
       /*
         Backend should return a signed URL.
@@ -33,33 +31,40 @@ export default function FileCard({ file, index }) {
         data.downloadUrl
       */
 
-      const downloadUrl =
-        data.downloadUrl ||
-        data.url;
+      const downloadUrl = data.downloadUrl || data.url;
 
       if (!downloadUrl) {
-        throw new Error(
-          "Download URL missing"
-        );
+        throw new Error("Download URL missing");
       }
 
       setMenuOpen(false);
 
-      window.location.href =
-        downloadUrl;
+      window.location.href = downloadUrl;
     } catch (error) {
-      console.error(
-        "Download failed:",
-        error
-      );
+      console.error("Download failed:", error);
 
+      setError(error.response?.data?.message || "Unable to download file.");
+    }
+  }
+  async function handleTrash() {
+    if (trashMutation.isPending) return;
+
+    const confirmed = window.confirm(`Move "${file.name}" to trash?`);
+
+    if (!confirmed) return;
+
+    setError("");
+
+    try {
+      await trashMutation.mutateAsync(file.id);
+
+      setMenuOpen(false);
+    } catch (error) {
       setError(
-        error.response?.data?.message ||
-          "Unable to download file."
+        error.response?.data?.message || "Unable to move file to trash.",
       );
     }
   }
-
   return (
     <motion.article
       initial={{
@@ -101,17 +106,11 @@ export default function FileCard({ file, index }) {
             whileTap={{
               scale: 0.9,
             }}
-            onClick={() =>
-              setMenuOpen(
-                (value) => !value
-              )
-            }
+            onClick={() => setMenuOpen((value) => !value)}
             className="btn btn-ghost btn-circle btn-sm opacity-50 transition group-hover:opacity-100"
             aria-label={`Actions for ${file.name}`}
           >
-            <MoreVertical
-              size={17}
-            />
+            <MoreVertical size={17} />
           </motion.button>
 
           <AnimatePresence>
@@ -122,9 +121,7 @@ export default function FileCard({ file, index }) {
                 <button
                   type="button"
                   aria-label="Close file actions"
-                  onClick={() =>
-                    setMenuOpen(false)
-                  }
+                  onClick={() => setMenuOpen(false)}
                   className="fixed inset-0 z-40 cursor-default"
                 />
 
@@ -157,28 +154,35 @@ export default function FileCard({ file, index }) {
                     whileTap={{
                       scale: 0.97,
                     }}
-                    onClick={
-                      handleDownload
-                    }
-                    disabled={
-                      downloadMutation.isPending
-                    }
+                    onClick={handleDownload}
+                    disabled={downloadMutation.isPending}
                     className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
                   >
                     {downloadMutation.isPending ? (
-                      <LoaderCircle
-                        size={16}
-                        className="animate-spin"
-                      />
+                      <LoaderCircle size={16} className="animate-spin" />
                     ) : (
-                      <Download
-                        size={16}
-                      />
+                      <Download size={16} />
                     )}
 
-                    {downloadMutation.isPending
-                      ? "Preparing..."
-                      : "Download"}
+                    {downloadMutation.isPending ? "Preparing..." : "Download"}
+                  </motion.button>
+                  <div className="my-1 border-t border-base-300" />
+
+                  <motion.button
+                    type="button"
+                    whileHover={{ x: 3 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={handleTrash}
+                    disabled={trashMutation.isPending}
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-error transition hover:bg-error/10"
+                  >
+                    {trashMutation.isPending ? (
+                      <LoaderCircle size={16} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={16} />
+                    )}
+
+                    {trashMutation.isPending ? "Moving..." : "Move to trash"}
                   </motion.button>
                 </motion.div>
               </>
@@ -187,22 +191,14 @@ export default function FileCard({ file, index }) {
         </div>
       </div>
 
-      <p className="mt-5 truncate font-semibold">
-        {file.name}
-      </p>
+      <p className="mt-5 truncate font-semibold">{file.name}</p>
 
       <div className="mt-1 flex gap-2 text-xs opacity-40">
-        <span>
-          {formatBytes(file.size)}
-        </span>
+        <span>{formatBytes(file.size)}</span>
 
         <span>•</span>
 
-        <span>
-          {new Date(
-            file.updatedAt
-          ).toLocaleDateString()}
-        </span>
+        <span>{new Date(file.updatedAt).toLocaleDateString()}</span>
       </div>
 
       {error && (
