@@ -1,3 +1,5 @@
+
+
 import { S3Client } from "@aws-sdk/client-s3";
 
 export const storageClient = new S3Client({
@@ -11,5 +13,9 @@ export const storageClient = new S3Client({
   },
 });
 
+
 export const STORAGE_BUCKET =
   process.env.B2_BUCKET_NAME;
+
+
+  
