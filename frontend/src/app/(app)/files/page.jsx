@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
@@ -31,6 +31,8 @@ export default function FilesPage() {
   const [createFolderOpen, setCreateFolderOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
 
+  const loadMoreRef = useRef(null);
+
   const {
     data: folderDetails,
     isLoading: folderDetailsLoading,
@@ -40,9 +42,12 @@ export default function FilesPage() {
     data,
     isLoading,
     isFetching,
+    isFetchingNextPage,
     isError,
     error,
     refetch,
+    fetchNextPage,
+    hasNextPage,
   } = useExplorer({
     folderId,
     search,
@@ -51,13 +56,72 @@ export default function FilesPage() {
     order,
   });
 
-  const folders = data?.folders || [];
-  const files = data?.files || [];
+  // =====================================================
+  // FLATTEN INFINITE QUERY PAGES
+  // =====================================================
 
-  const itemsCount = useMemo(
-    () => folders.length + files.length,
-    [folders, files]
+  const folders = useMemo(
+    () =>
+      data?.pages.flatMap(
+        (page) => page.folders || []
+      ) || [],
+    [data]
   );
+
+  const files = useMemo(
+    () =>
+      data?.pages.flatMap(
+        (page) => page.files || []
+      ) || [],
+    [data]
+  );
+
+  const itemsCount =
+    folders.length + files.length;
+
+  // =====================================================
+  // INFINITE SCROLL
+  // =====================================================
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+
+    if (!target) return;
+
+    const observer =
+      new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+
+          if (
+            entry.isIntersecting &&
+            hasNextPage &&
+            !isFetchingNextPage
+          ) {
+            fetchNextPage();
+          }
+        },
+        {
+          root: null,
+          rootMargin: "250px",
+          threshold: 0,
+        }
+      );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  ]);
+
+  // =====================================================
+  // NAVIGATION
+  // =====================================================
 
   function openFolder(id) {
     setSearch("");
@@ -87,8 +151,14 @@ export default function FilesPage() {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <motion.div
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
+          initial={{
+            opacity: 0,
+            scale: 0.92,
+          }}
+          animate={{
+            opacity: 1,
+            scale: 1,
+          }}
           className="flex flex-col items-center gap-3"
         >
           <LoaderCircle
@@ -111,8 +181,14 @@ export default function FilesPage() {
   if (isError) {
     return (
       <motion.div
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{
+          opacity: 0,
+          y: 15,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
         className="mx-auto mt-16 max-w-lg rounded-2xl border border-error/30 bg-error/5 p-6 text-center"
       >
         <h2 className="text-lg font-bold">
@@ -185,22 +261,29 @@ export default function FilesPage() {
         setView={setView}
       />
 
-      {/* ==================== REFETCH INDICATOR ==================== */}
+      {/* ==================== BACKGROUND REFETCH ==================== */}
 
-      {isFetching && (
-        <motion.div
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 0.45, y: 0 }}
-          className="mt-3 flex items-center gap-2 text-xs"
-        >
-          <LoaderCircle
-            size={13}
-            className="animate-spin"
-          />
+      {isFetching &&
+        !isFetchingNextPage && (
+          <motion.div
+            initial={{
+              opacity: 0,
+              y: -4,
+            }}
+            animate={{
+              opacity: 0.45,
+              y: 0,
+            }}
+            className="mt-3 flex items-center gap-2 text-xs"
+          >
+            <LoaderCircle
+              size={13}
+              className="animate-spin"
+            />
 
-          Updating results...
-        </motion.div>
-      )}
+            Updating results...
+          </motion.div>
+        )}
 
       {/* ==================== CONTENT ==================== */}
 
@@ -219,6 +302,52 @@ export default function FilesPage() {
           view={view}
           onOpenFolder={openFolder}
         />
+      )}
+
+      {/* ==================== INFINITE SCROLL SENTINEL ==================== */}
+
+      {itemsCount > 0 && (
+        <div
+          ref={loadMoreRef}
+          className="flex min-h-24 items-center justify-center py-6"
+        >
+          {isFetchingNextPage ? (
+            <motion.div
+              initial={{
+                opacity: 0,
+                y: 8,
+              }}
+              animate={{
+                opacity: 0.5,
+                y: 0,
+              }}
+              className="flex items-center gap-2 text-sm"
+            >
+              <LoaderCircle
+                size={17}
+                className="animate-spin"
+              />
+
+              Loading more...
+            </motion.div>
+          ) : hasNextPage ? (
+            <span className="text-xs opacity-30">
+              Scroll for more
+            </span>
+          ) : (
+            <motion.span
+              initial={{
+                opacity: 0,
+              }}
+              animate={{
+                opacity: 0.3,
+              }}
+              className="text-xs"
+            >
+              You&apos;ve reached the end
+            </motion.span>
+          )}
+        </div>
       )}
 
       {/* ==================== CREATE FOLDER ==================== */}

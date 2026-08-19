@@ -1,6 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   File,
@@ -29,31 +34,81 @@ export default function TrashPage() {
     data,
     isLoading,
     isFetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
     isError,
     error,
     refetch,
   } = useTrash();
 
-  const restoreFileMutation =
-    useRestoreFile();
+  const restoreFileMutation = useRestoreFile();
+  const restoreFolderMutation = useRestoreFolder();
+  const deleteFileMutation = useDeleteFilePermanently();
+  const deleteFolderMutation = useDeleteFolderPermanently();
 
-  const restoreFolderMutation =
-    useRestoreFolder();
+  const [actionError, setActionError] = useState("");
 
-  const deleteFileMutation =
-    useDeleteFilePermanently();
+  const loadMoreRef = useRef(null);
 
-  const deleteFolderMutation =
-    useDeleteFolderPermanently();
+  const folders = useMemo(
+    () =>
+      data?.pages.flatMap(
+        (page) => page.folders || []
+      ) || [],
+    [data]
+  );
 
-  const [actionError, setActionError] =
-    useState("");
-
-  const files = data?.files || [];
-  const folders = data?.folders || [];
+  const files = useMemo(
+    () =>
+      data?.pages.flatMap(
+        (page) => page.files || []
+      ) || [],
+    [data]
+  );
 
   const totalItems =
     files.length + folders.length;
+
+  // =====================================================
+  // INFINITE SCROLL
+  // =====================================================
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+
+    if (!target) return;
+
+    const observer =
+      new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0];
+
+          if (
+            entry.isIntersecting &&
+            hasNextPage &&
+            !isFetchingNextPage
+          ) {
+            fetchNextPage();
+          }
+        },
+        {
+          root: null,
+          rootMargin: "250px",
+          threshold: 0,
+        }
+      );
+
+    observer.observe(target);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  ]);
 
   // =====================================================
   // RESTORE FILE
@@ -161,8 +216,14 @@ export default function TrashPage() {
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <motion.div
-          initial={{ opacity: 0, scale: 0.92 }}
-          animate={{ opacity: 1, scale: 1 }}
+          initial={{
+            opacity: 0,
+            scale: 0.92,
+          }}
+          animate={{
+            opacity: 1,
+            scale: 1,
+          }}
           className="flex flex-col items-center gap-3"
         >
           <LoaderCircle
@@ -185,8 +246,14 @@ export default function TrashPage() {
   if (isError) {
     return (
       <motion.div
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{
+          opacity: 0,
+          y: 15,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
         className="mx-auto mt-16 max-w-lg rounded-2xl border border-error/30 bg-error/5 p-6 text-center"
       >
         <h2 className="text-lg font-bold">
@@ -230,16 +297,17 @@ export default function TrashPage() {
 
           <p className="mt-2 text-sm opacity-55">
             {totalItems} item
-            {totalItems === 1 ? "" : "s"} in trash.
+            {totalItems === 1 ? "" : "s"} loaded.
           </p>
         </div>
 
-        {isFetching && (
-          <LoaderCircle
-            size={17}
-            className="animate-spin opacity-40"
-          />
-        )}
+        {isFetching &&
+          !isFetchingNextPage && (
+            <LoaderCircle
+              size={17}
+              className="animate-spin opacity-40"
+            />
+          )}
       </motion.section>
 
       {/* ==================== WARNING ==================== */}
@@ -375,9 +443,7 @@ export default function TrashPage() {
                     >
                       <div className="flex items-start gap-3">
                         <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-base-200">
-                          <Folder
-                            size={20}
-                          />
+                          <Folder size={20} />
                         </div>
 
                         <div className="min-w-0 flex-1">
@@ -606,6 +672,52 @@ export default function TrashPage() {
                 )}
               </div>
             </section>
+          )}
+        </div>
+      )}
+
+      {/* ==================== INFINITE SCROLL ==================== */}
+
+      {totalItems > 0 && (
+        <div
+          ref={loadMoreRef}
+          className="flex min-h-24 items-center justify-center py-6"
+        >
+          {isFetchingNextPage ? (
+            <motion.div
+              initial={{
+                opacity: 0,
+                y: 8,
+              }}
+              animate={{
+                opacity: 0.5,
+                y: 0,
+              }}
+              className="flex items-center gap-2 text-sm"
+            >
+              <LoaderCircle
+                size={17}
+                className="animate-spin"
+              />
+
+              Loading more trash...
+            </motion.div>
+          ) : hasNextPage ? (
+            <span className="text-xs opacity-30">
+              Scroll for more
+            </span>
+          ) : (
+            <motion.span
+              initial={{
+                opacity: 0,
+              }}
+              animate={{
+                opacity: 0.3,
+              }}
+              className="text-xs"
+            >
+              You&apos;ve reached the end
+            </motion.span>
           )}
         </div>
       )}

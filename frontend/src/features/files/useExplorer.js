@@ -1,20 +1,20 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-async function fetchExplorer({
+async function fetchExplorerPage({
+  pageParam = 1,
   folderId,
   search,
   type,
   sortBy,
   order,
-  page,
   limit,
 }) {
   const commonParams = {
     search: search || undefined,
     sortBy,
     order,
-    page,
+    page: pageParam,
     limit,
   };
 
@@ -48,6 +48,8 @@ async function fetchExplorer({
 
     filePagination:
       filesResponse.data.data.pagination,
+
+    page: pageParam,
   };
 }
 
@@ -57,10 +59,9 @@ export function useExplorer({
   type = "",
   sortBy = "name",
   order = "asc",
-  page = 1,
   limit = 20,
 } = {}) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: [
       "explorer",
       {
@@ -69,30 +70,46 @@ export function useExplorer({
         type,
         sortBy,
         order,
-        page,
         limit,
       },
     ],
 
-    queryFn: () =>
-      fetchExplorer({
+    initialPageParam: 1,
+
+    queryFn: ({ pageParam }) =>
+      fetchExplorerPage({
+        pageParam,
         folderId,
         search,
         type,
         sortBy,
         order,
-        page,
         limit,
       }),
 
-    staleTime: 20 * 1000,
+    getNextPageParam: (
+      lastPage
+    ) => {
+      const folderHasNext =
+        lastPage
+          .folderPagination
+          ?.hasNextPage;
 
-    /*
-      Keeps previous content visible while
-      moving between pages/filter states.
-    */
-    placeholderData:
-      (previousData) =>
-        previousData,
+      const fileHasNext =
+        lastPage
+          .filePagination
+          ?.hasNextPage;
+
+      if (
+        !folderHasNext &&
+        !fileHasNext
+      ) {
+        return undefined;
+      }
+
+      return lastPage.page + 1;
+    },
+
+    staleTime: 20 * 1000,
   });
 }
