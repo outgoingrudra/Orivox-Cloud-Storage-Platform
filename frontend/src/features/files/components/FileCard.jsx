@@ -8,6 +8,7 @@ import {
   LoaderCircle,
   MoreVertical,
   MoveRight,
+  Share2,
   Trash2,
 } from "lucide-react";
 
@@ -21,6 +22,8 @@ import { useDownloadFile } from "@/features/files/useDownloadFile";
 
 import RenameModal from "@/features/files/components/RenameModal";
 import MoveModal from "@/features/files/components/MoveModal";
+
+import ShareModal from "@/features/share/components/ShareModal";
 
 import {
   formatBytes,
@@ -41,6 +44,9 @@ export default function FileCard({
     useState(false);
 
   const [moveOpen, setMoveOpen] =
+    useState(false);
+
+  const [shareOpen, setShareOpen] =
     useState(false);
 
   const [error, setError] =
@@ -74,7 +80,9 @@ export default function FileCard({
       }
 
       setMenuOpen(false);
-      window.location.href = downloadUrl;
+
+      window.location.href =
+        downloadUrl;
     } catch (error) {
       console.error(
         "Download failed:",
@@ -122,6 +130,11 @@ export default function FileCard({
   function handleMove() {
     setMenuOpen(false);
     setMoveOpen(true);
+  }
+
+  function handleShare() {
+    setMenuOpen(false);
+    setShareOpen(true);
   }
 
   return (
@@ -215,8 +228,12 @@ export default function FileCard({
                     <motion.button
                       type="button"
                       whileHover={{ x: 3 }}
-                      whileTap={{ scale: 0.97 }}
-                      onClick={handleDownload}
+                      whileTap={{
+                        scale: 0.97,
+                      }}
+                      onClick={
+                        handleDownload
+                      }
                       disabled={
                         downloadMutation.isPending
                       }
@@ -236,16 +253,40 @@ export default function FileCard({
                         : "Download"}
                     </motion.button>
 
+                    {/* SHARE */}
+
+                    <motion.button
+                      type="button"
+                      whileHover={{ x: 3 }}
+                      whileTap={{
+                        scale: 0.97,
+                      }}
+                      onClick={
+                        handleShare
+                      }
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
+                    >
+                      <Share2 size={16} />
+                      Share
+                    </motion.button>
+
                     {/* RENAME */}
 
                     <motion.button
                       type="button"
                       whileHover={{ x: 3 }}
-                      whileTap={{ scale: 0.97 }}
-                      onClick={handleRename}
+                      whileTap={{
+                        scale: 0.97,
+                      }}
+                      onClick={
+                        handleRename
+                      }
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
                     >
-                      <FilePenLine size={16} />
+                      <FilePenLine
+                        size={16}
+                      />
+
                       Rename
                     </motion.button>
 
@@ -254,8 +295,12 @@ export default function FileCard({
                     <motion.button
                       type="button"
                       whileHover={{ x: 3 }}
-                      whileTap={{ scale: 0.97 }}
-                      onClick={handleMove}
+                      whileTap={{
+                        scale: 0.97,
+                      }}
+                      onClick={
+                        handleMove
+                      }
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
                     >
                       <MoveRight size={16} />
@@ -269,8 +314,12 @@ export default function FileCard({
                     <motion.button
                       type="button"
                       whileHover={{ x: 3 }}
-                      whileTap={{ scale: 0.97 }}
-                      onClick={handleTrash}
+                      whileTap={{
+                        scale: 0.97,
+                      }}
+                      onClick={
+                        handleTrash
+                      }
                       disabled={
                         trashMutation.isPending
                       }
@@ -296,6 +345,8 @@ export default function FileCard({
           </div>
         </div>
 
+        {/* ==================== FILE INFO ==================== */}
+
         <p className="mt-5 truncate font-semibold">
           {file.name}
         </p>
@@ -314,6 +365,8 @@ export default function FileCard({
           </span>
         </div>
 
+        {/* ==================== ERROR ==================== */}
+
         {error && (
           <motion.p
             initial={{
@@ -331,6 +384,8 @@ export default function FileCard({
         )}
       </motion.article>
 
+      {/* ==================== RENAME MODAL ==================== */}
+
       <RenameModal
         open={renameOpen}
         onClose={() =>
@@ -340,10 +395,23 @@ export default function FileCard({
         type="file"
       />
 
+      {/* ==================== MOVE MODAL ==================== */}
+
       <MoveModal
         open={moveOpen}
         onClose={() =>
           setMoveOpen(false)
+        }
+        item={file}
+        type="file"
+      />
+
+      {/* ==================== SHARE MODAL ==================== */}
+
+      <ShareModal
+        open={shareOpen}
+        onClose={() =>
+          setShareOpen(false)
         }
         item={file}
         type="file"

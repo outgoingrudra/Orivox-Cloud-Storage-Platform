@@ -182,50 +182,7 @@ export default function Topbar({
       </motion.button>
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
-        {/* ==================== UPLOAD ==================== */}
-
-        <motion.button
-          type="button"
-          whileHover={{
-            scale: 1.025,
-            y: -1,
-          }}
-          whileTap={{
-            scale: 0.96,
-          }}
-          className="
-            btn
-            btn-neutral
-            btn-sm
-            hidden
-            rounded-xl
-            px-4
-            sm:inline-flex
-          "
-        >
-          <Upload size={16} />
-          Upload
-        </motion.button>
-
-        {/* Mobile upload */}
-
-        <motion.button
-          type="button"
-          whileTap={{
-            scale: 0.9,
-          }}
-          className="
-            btn
-            btn-neutral
-            btn-circle
-            btn-sm
-            sm:hidden
-          "
-          aria-label="Upload"
-        >
-          <Upload size={16} />
-        </motion.button>
-
+       
         {/* ==================== THEME ==================== */}
 
         <ThemeSwitcher />

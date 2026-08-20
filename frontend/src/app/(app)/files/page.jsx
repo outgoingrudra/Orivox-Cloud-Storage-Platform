@@ -1,8 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { LoaderCircle, RefreshCw } from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  useRouter,
+  useSearchParams,
+} from "next/navigation";
+
+import {
+  LoaderCircle,
+  RefreshCw,
+} from "lucide-react";
+
 import { motion } from "framer-motion";
 
 import { useExplorer } from "@/features/files/useExplorer";
@@ -17,27 +31,73 @@ import CreateFolderModal from "@/features/files/components/CreateFolderModal";
 import UploadModal from "@/features/files/components/UploadModal";
 
 export default function FilesPage() {
-  
-  const router = useRouter();
-  const searchParams = useSearchParams();
+  const router =
+    useRouter();
 
-  const folderId = searchParams.get("folder");
+  const searchParams =
+    useSearchParams();
 
-  const [search, setSearch] = useState("");
-  const [type, setType] = useState("");
-  const [sortBy, setSortBy] = useState("name");
-  const [order, setOrder] = useState("asc");
-  const [view, setView] = useState("grid");
+  const folderId =
+    searchParams.get("folder");
 
-  const [createFolderOpen, setCreateFolderOpen] = useState(false);
-  const [uploadOpen, setUploadOpen] = useState(false);
+  // ==================== FILTER / VIEW STATE ====================
 
-  const loadMoreRef = useRef(null);
+  const [search, setSearch] =
+    useState("");
+
+  /*
+    File-specific type filter:
+    image / video / audio / document / etc.
+  */
+  const [type, setType] =
+    useState("");
+
+  /*
+    Explorer-level content filter:
+    all / files / folders
+  */
+  const [
+    contentFilter,
+    setContentFilter,
+  ] = useState("all");
+
+  const [sortBy, setSortBy] =
+    useState("name");
+
+  const [order, setOrder] =
+    useState("asc");
+
+  const [view, setView] =
+    useState("grid");
+
+  // ==================== MODALS ====================
+
+  const [
+    createFolderOpen,
+    setCreateFolderOpen,
+  ] = useState(false);
+
+  const [
+    uploadOpen,
+    setUploadOpen,
+  ] = useState(false);
+
+  // ==================== INFINITE SCROLL ====================
+
+  const loadMoreRef =
+    useRef(null);
+
+  // ==================== FOLDER DETAILS ====================
 
   const {
     data: folderDetails,
-    isLoading: folderDetailsLoading,
-  } = useFolderDetails(folderId);
+    isLoading:
+      folderDetailsLoading,
+  } = useFolderDetails(
+    folderId
+  );
+
+  // ==================== EXPLORER ====================
 
   const {
     data,
@@ -53,6 +113,7 @@ export default function FilesPage() {
     folderId,
     search,
     type,
+    contentFilter,
     sortBy,
     order,
   });
@@ -64,7 +125,8 @@ export default function FilesPage() {
   const folders = useMemo(
     () =>
       data?.pages.flatMap(
-        (page) => page.folders || []
+        (page) =>
+          page.folders || []
       ) || [],
     [data]
   );
@@ -72,27 +134,31 @@ export default function FilesPage() {
   const files = useMemo(
     () =>
       data?.pages.flatMap(
-        (page) => page.files || []
+        (page) =>
+          page.files || []
       ) || [],
     [data]
   );
 
   const itemsCount =
-    folders.length + files.length;
+    folders.length +
+    files.length;
 
   // =====================================================
   // INFINITE SCROLL
   // =====================================================
 
   useEffect(() => {
-    const target = loadMoreRef.current;
+    const target =
+      loadMoreRef.current;
 
     if (!target) return;
 
     const observer =
       new IntersectionObserver(
         (entries) => {
-          const entry = entries[0];
+          const entry =
+            entries[0];
 
           if (
             entry.isIntersecting &&
@@ -104,12 +170,15 @@ export default function FilesPage() {
         },
         {
           root: null,
-          rootMargin: "250px",
+          rootMargin:
+            "250px",
           threshold: 0,
         }
       );
 
-    observer.observe(target);
+    observer.observe(
+      target
+    );
 
     return () => {
       observer.disconnect();
@@ -128,8 +197,19 @@ export default function FilesPage() {
     setSearch("");
     setType("");
 
+    /*
+      Keep contentFilter unchanged.
+
+      Example:
+      If the user selects "Folders",
+      entering another folder should
+      still show only folders.
+    */
+
     router.push(
-      `/files?folder=${encodeURIComponent(id)}`
+      `/files?folder=${encodeURIComponent(
+        id
+      )}`
     );
   }
 
@@ -137,7 +217,9 @@ export default function FilesPage() {
     setSearch("");
     setType("");
 
-    router.push("/files");
+    router.push(
+      "/files"
+    );
   }
 
   function handleUpload() {
@@ -197,25 +279,44 @@ export default function FilesPage() {
         </h2>
 
         <p className="mt-2 text-sm opacity-60">
-          {error?.response?.data?.message ||
+          {error?.response
+            ?.data
+            ?.message ||
             "Something went wrong while loading your workspace."}
         </p>
 
         <button
           type="button"
-          onClick={() => refetch()}
+          onClick={() =>
+            refetch()
+          }
           className="btn btn-neutral btn-sm mt-5 rounded-xl"
         >
-          <RefreshCw size={15} />
+          <RefreshCw
+            size={15}
+          />
+
           Try again
         </button>
       </motion.div>
     );
   }
 
+  // =====================================================
+  // EMPTY STATE CONTEXT
+  // =====================================================
+
   const searching =
-    Boolean(search.trim()) ||
-    Boolean(type);
+    Boolean(
+      search.trim()
+    ) ||
+    Boolean(type) ||
+    contentFilter !==
+      "all";
+
+  // =====================================================
+  // PAGE
+  // =====================================================
 
   return (
     <div className="mx-auto max-w-7xl">
@@ -223,43 +324,80 @@ export default function FilesPage() {
 
       <ExplorerHeader
         title={
-          folderDetails?.folder?.name ||
+          folderDetails?.folder
+            ?.name ||
           "My Files"
         }
-        itemsCount={itemsCount}
-        onCreateFolder={() =>
-          setCreateFolderOpen(true)
+        itemsCount={
+          itemsCount
         }
-        onUpload={handleUpload}
+        onCreateFolder={() =>
+          setCreateFolderOpen(
+            true
+          )
+        }
+        onUpload={
+          handleUpload
+        }
       />
 
       {/* ==================== BREADCRUMB ==================== */}
 
       <ExplorerBreadcrumbs
-        folderId={folderId}
+        folderId={
+          folderId
+        }
         path={
-          folderDetails?.path || []
+          folderDetails?.path ||
+          []
         }
         loading={
           folderDetailsLoading
         }
-        onOpenFolder={openFolder}
-        onRoot={goToRoot}
+        onOpenFolder={
+          openFolder
+        }
+        onRoot={
+          goToRoot
+        }
       />
 
       {/* ==================== TOOLBAR ==================== */}
 
       <ExplorerToolbar
         search={search}
-        setSearch={setSearch}
+        setSearch={
+          setSearch
+        }
+
         type={type}
-        setType={setType}
-        sortBy={sortBy}
-        setSortBy={setSortBy}
+        setType={
+          setType
+        }
+
+        contentFilter={
+          contentFilter
+        }
+        setContentFilter={
+          setContentFilter
+        }
+
+        sortBy={
+          sortBy
+        }
+        setSortBy={
+          setSortBy
+        }
+
         order={order}
-        setOrder={setOrder}
+        setOrder={
+          setOrder
+        }
+
         view={view}
-        setView={setView}
+        setView={
+          setView
+        }
       />
 
       {/* ==================== BACKGROUND REFETCH ==================== */}
@@ -290,18 +428,30 @@ export default function FilesPage() {
 
       {itemsCount === 0 ? (
         <EmptyExplorer
-          searching={searching}
-          onCreateFolder={() =>
-            setCreateFolderOpen(true)
+          searching={
+            searching
           }
-          onUpload={handleUpload}
+          onCreateFolder={() =>
+            setCreateFolderOpen(
+              true
+            )
+          }
+          onUpload={
+            handleUpload
+          }
         />
       ) : (
         <ExplorerList
-          folders={folders}
-          files={files}
+          folders={
+            folders
+          }
+          files={
+            files
+          }
           view={view}
-          onOpenFolder={openFolder}
+          onOpenFolder={
+            openFolder
+          }
         />
       )}
 
@@ -309,7 +459,9 @@ export default function FilesPage() {
 
       {itemsCount > 0 && (
         <div
-          ref={loadMoreRef}
+          ref={
+            loadMoreRef
+          }
           className="flex min-h-24 items-center justify-center py-6"
         >
           {isFetchingNextPage ? (
@@ -345,7 +497,8 @@ export default function FilesPage() {
               }}
               className="text-xs"
             >
-              You&apos;ve reached the end
+              You&apos;ve
+              reached the end
             </motion.span>
           )}
         </div>
@@ -354,26 +507,40 @@ export default function FilesPage() {
       {/* ==================== CREATE FOLDER ==================== */}
 
       <CreateFolderModal
-        open={createFolderOpen}
-        onClose={() =>
-          setCreateFolderOpen(false)
+        open={
+          createFolderOpen
         }
-        parentId={folderId}
+        onClose={() =>
+          setCreateFolderOpen(
+            false
+          )
+        }
+        parentId={
+          folderId
+        }
         parentName={
-          folderDetails?.folder?.name
+          folderDetails?.folder
+            ?.name
         }
       />
 
       {/* ==================== UPLOAD ==================== */}
 
       <UploadModal
-        open={uploadOpen}
-        onClose={() =>
-          setUploadOpen(false)
+        open={
+          uploadOpen
         }
-        folderId={folderId}
+        onClose={() =>
+          setUploadOpen(
+            false
+          )
+        }
+        folderId={
+          folderId
+        }
         folderName={
-          folderDetails?.folder?.name
+          folderDetails?.folder
+            ?.name
         }
       />
     </div>

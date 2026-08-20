@@ -6,6 +6,7 @@ async function fetchExplorerPage({
   folderId,
   search,
   type,
+  contentFilter,
   sortBy,
   order,
   limit,
@@ -18,36 +19,95 @@ async function fetchExplorerPage({
     limit,
   };
 
-  const [foldersResponse, filesResponse] =
-    await Promise.all([
-      api.get("/folders", {
-        params: {
-          ...commonParams,
-          parentId: folderId || undefined,
-        },
-      }),
+  // ==================== FILES ONLY ====================
 
-      api.get("/files", {
+  if (contentFilter === "files") {
+    const filesResponse =
+      await api.get("/files", {
         params: {
           ...commonParams,
-          folderId: folderId || undefined,
+          folderId:
+            folderId || undefined,
           type: type || undefined,
         },
-      }),
-    ]);
+      });
+
+    return {
+      folders: [],
+      files:
+        filesResponse.data.data.files,
+      folderPagination: null,
+      filePagination:
+        filesResponse.data.data
+          .pagination,
+      page: pageParam,
+    };
+  }
+
+  // ==================== FOLDERS ONLY ====================
+
+  if (contentFilter === "folders") {
+    const foldersResponse =
+      await api.get("/folders", {
+        params: {
+          ...commonParams,
+          parentId:
+            folderId || undefined,
+        },
+      });
+
+    return {
+      folders:
+        foldersResponse.data.data
+          .folders,
+      files: [],
+      folderPagination:
+        foldersResponse.data.data
+          .pagination,
+      filePagination: null,
+      page: pageParam,
+    };
+  }
+
+  // ==================== ALL ====================
+
+  const [
+    foldersResponse,
+    filesResponse,
+  ] = await Promise.all([
+    api.get("/folders", {
+      params: {
+        ...commonParams,
+        parentId:
+          folderId || undefined,
+      },
+    }),
+
+    api.get("/files", {
+      params: {
+        ...commonParams,
+        folderId:
+          folderId || undefined,
+        type: type || undefined,
+      },
+    }),
+  ]);
 
   return {
     folders:
-      foldersResponse.data.data.folders,
+      foldersResponse.data.data
+        .folders,
 
     files:
       filesResponse.data.data.files,
 
     folderPagination:
-      foldersResponse.data.data.pagination,
+      foldersResponse.data.data
+        .pagination,
 
     filePagination:
-      filesResponse.data.data.pagination,
+      filesResponse.data.data
+        .pagination,
 
     page: pageParam,
   };
@@ -57,6 +117,7 @@ export function useExplorer({
   folderId = null,
   search = "",
   type = "",
+  contentFilter = "all",
   sortBy = "name",
   order = "asc",
   limit = 20,
@@ -68,6 +129,7 @@ export function useExplorer({
         folderId,
         search,
         type,
+        contentFilter,
         sortBy,
         order,
         limit,
@@ -82,6 +144,7 @@ export function useExplorer({
         folderId,
         search,
         type,
+        contentFilter,
         sortBy,
         order,
         limit,
@@ -91,14 +154,12 @@ export function useExplorer({
       lastPage
     ) => {
       const folderHasNext =
-        lastPage
-          .folderPagination
-          ?.hasNextPage;
+        lastPage.folderPagination
+          ?.hasNextPage ?? false;
 
       const fileHasNext =
-        lastPage
-          .filePagination
-          ?.hasNextPage;
+        lastPage.filePagination
+          ?.hasNextPage ?? false;
 
       if (
         !folderHasNext &&
