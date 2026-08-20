@@ -11,7 +11,9 @@ import {
   resendVerification,
   forgotPasswordController,
   resetPasswordController,
-  updateMe
+  updateMe,
+   sessions,
+   revokeSessionController
 } from "./auth.controller.js";
 
 import { requireAuth } from "../../middlewares/auth.middleware.js";
@@ -43,6 +45,17 @@ router.post("/refresh", refresh);
 router.post("/logout", logout);
 
 router.post("/logout-all", requireAuth, logoutAll);
+
+router.get(
+  "/sessions",
+  requireAuth,
+  sessions
+);
+router.delete(
+  "/sessions/:sessionId",
+  requireAuth,
+  revokeSessionController
+);
 
 // ==================== USER ====================
 

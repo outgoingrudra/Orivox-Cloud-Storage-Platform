@@ -4,7 +4,8 @@ import {
   resendVerificationSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
-  updateMeSchema
+  updateMeSchema,
+  sessionIdParamSchema
 } from "./auth.validator.js";
 
 import {
@@ -18,7 +19,9 @@ import {
   resendVerificationEmail,
   forgotPassword,
   resetPassword,
-  updateUserProfile
+  updateUserProfile,
+  getActiveSessions,
+  revokeSession
 } from "./auth.service.js";
 
 import { asyncHandler } from "../../utils/asyncHandler.js";
@@ -296,3 +299,57 @@ export const updateMe = asyncHandler(
     });
   }
 );
+
+
+export const sessions = asyncHandler(
+  async (req, res) => {
+    const activeSessions =
+      await getActiveSessions({
+        userId: req.user.id,
+      });
+
+    const sessionsWithCurrent =
+      activeSessions.map((session) => ({
+        ...session,
+        current:
+          session.id ===
+          req.user.sessionId,
+      }));
+
+    return res.status(200).json({
+      success: true,
+
+      data: {
+        sessions: sessionsWithCurrent,
+        count:
+          sessionsWithCurrent.length,
+      },
+    });
+  }
+);
+
+export const revokeSessionController =asyncHandler(async (req, res) => {
+    const result =
+      sessionIdParamSchema.safeParse(
+        req.params
+      );
+
+    if (!result.success) {
+      throw new AppError(
+        result.error.issues[0].message,
+        400
+      );
+    }
+
+    await revokeSession({
+      userId: req.user.id,
+      sessionId:
+        result.data.sessionId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Session revoked successfully.",
+    });
+  });

@@ -76,3 +76,11 @@ export const updateMeSchema = z.object({
     .min(2, "Name must contain at least 2 characters.")
     .max(50, "Name cannot exceed 50 characters."),
 });
+
+
+export const sessionIdParamSchema = z.object({
+  sessionId: z
+    .string()
+    .trim()
+    .min(1, "Session ID is required."),
+});

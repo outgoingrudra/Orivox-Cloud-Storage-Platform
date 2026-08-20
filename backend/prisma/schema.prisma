@@ -50,15 +50,16 @@ model EmailVerificationToken {
 }
 
 model Session {
-  id               String @id @default(cuid())
+  id               String   @id @default(cuid())
   userId           String
-  refreshTokenHash String @unique
+  refreshTokenHash String   @unique
 
   userAgent String?
   ipAddress String?
 
-  expiresAt DateTime
-  revokedAt DateTime?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime @default(now())
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -66,6 +67,8 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
 }
 
 model PasswordResetToken {

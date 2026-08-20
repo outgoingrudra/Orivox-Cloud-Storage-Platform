@@ -26,10 +26,20 @@ const REFRESH_SESSION_EXPIRY = 7 * 24 * 60 * 60 * 1000;
 const hashToken = (token) =>
   crypto.createHash("sha256").update(token).digest("hex");
 
-const generateAccessToken = (userId) =>
-  jwt.sign({ userId }, process.env.ACCESS_TOKEN_SECRET, {
-    expiresIn: "15m",
-  });
+const generateAccessToken = ({
+  userId,
+  sessionId,
+ }) =>
+  jwt.sign(
+    {
+      userId,
+      sessionId,
+    },
+    process.env.ACCESS_TOKEN_SECRET,
+    {
+      expiresIn: "15m",
+    }
+  );
 
 // ==================== REGISTER ====================
 
@@ -177,7 +187,12 @@ export const verifyEmail = async (token) => {
 
 // ==================== LOGIN ====================
 
-export const loginUser = async ({ email, password, userAgent, ipAddress }) => {
+export const loginUser = async ({
+  email,
+  password,
+  userAgent,
+  ipAddress,
+}) => {
   const user = await prisma.user.findUnique({
     where: { email },
   });
@@ -185,34 +200,61 @@ export const loginUser = async ({ email, password, userAgent, ipAddress }) => {
   // Same error for wrong email/password
   // prevents account enumeration
   if (!user) {
-    throw new AppError("Invalid email or password", 401);
+    throw new AppError(
+      "Invalid email or password",
+      401
+    );
   }
 
-  const isMatch = await bcrypt.compare(password, user.passwordHash);
+  const isMatch = await bcrypt.compare(
+    password,
+    user.passwordHash
+  );
 
   if (!isMatch) {
-    throw new AppError("Invalid email or password", 401);
+    throw new AppError(
+      "Invalid email or password",
+      401
+    );
   }
 
   if (!user.isVerified) {
-    throw new AppError("Please verify your email first", 403);
+    throw new AppError(
+      "Please verify your email first",
+      403
+    );
   }
 
-  const accessToken = generateAccessToken(user.id);
+  const {
+    token: refreshToken,
+    tokenHash: refreshTokenHash,
+  } = generateRefreshToken();
 
-  const { token: refreshToken, tokenHash: refreshTokenHash } =
-    generateRefreshToken();
-
-  await prisma.session.create({
+  /*
+    Create the session first because
+    accessToken now contains sessionId.
+  */
+  const session = await prisma.session.create({
     data: {
       userId: user.id,
       refreshTokenHash,
-
       userAgent: userAgent || null,
       ipAddress: ipAddress || null,
 
-      expiresAt: new Date(Date.now() + REFRESH_SESSION_EXPIRY),
+      expiresAt: new Date(
+        Date.now() +
+          REFRESH_SESSION_EXPIRY
+      ),
     },
+
+    select: {
+      id: true,
+    },
+  });
+
+  const accessToken = generateAccessToken({
+    userId: user.id,
+    sessionId: session.id,
   });
 
   return {
@@ -229,22 +271,45 @@ export const loginUser = async ({ email, password, userAgent, ipAddress }) => {
 
 // ==================== REFRESH ACCESS TOKEN ====================
 
-export const refreshAccessToken = async (refreshToken) => {
-  const refreshTokenHash = hashToken(refreshToken);
+export const refreshAccessToken = async (
+  refreshToken
+) => {
+  const refreshTokenHash =
+    hashToken(refreshToken);
 
-  const session = await prisma.session.findUnique({
+  const session =
+    await prisma.session.findUnique({
+      where: {
+        refreshTokenHash,
+      },
+    });
+
+  if (
+    !session ||
+    session.revokedAt ||
+    session.expiresAt < new Date()
+  ) {
+    throw new AppError(
+      "Invalid or expired session",
+      401
+    );
+  }
+
+  await prisma.session.update({
     where: {
-      refreshTokenHash,
+      id: session.id,
+    },
+
+    data: {
+      lastUsedAt: new Date(),
     },
   });
 
-  if (!session || session.revokedAt || session.expiresAt < new Date()) {
-    throw new AppError("Invalid or expired session", 401);
-  }
-
-  return generateAccessToken(session.userId);
+  return generateAccessToken({
+    userId: session.userId,
+    sessionId: session.id,
+  });
 };
-
 // ==================== LOGOUT ====================
 
 export const logoutUser = async (refreshToken) => {
@@ -473,4 +538,72 @@ export const updateUserProfile = async ({
   });
 
   return user;
+};
+
+export const getActiveSessions = async ({
+  userId,
+}) => {
+  const sessions =
+    await prisma.session.findMany({
+      where: {
+        userId,
+
+        revokedAt: null,
+
+        expiresAt: {
+          gt: new Date(),
+        },
+      },
+
+      select: {
+        id: true,
+        userAgent: true,
+        ipAddress: true,
+        lastUsedAt: true,
+        createdAt: true,
+        expiresAt: true,
+      },
+
+      orderBy: {
+        lastUsedAt: "desc",
+      },
+    });
+
+  return sessions;
+};
+
+
+export const revokeSession = async ({
+  userId,
+  sessionId,
+}) => {
+  const session =
+    await prisma.session.findFirst({
+      where: {
+        id: sessionId,
+        userId,
+        revokedAt: null,
+      },
+
+      select: {
+        id: true,
+      },
+    });
+
+  if (!session) {
+    throw new AppError(
+      "Session not found.",
+      404
+    );
+  }
+
+  await prisma.session.update({
+    where: {
+      id: session.id,
+    },
+
+    data: {
+      revokedAt: new Date(),
+    },
+  });
 };
