@@ -16,6 +16,7 @@ export const startEmailWorker = async () => {
 
   await channel.consume("email.verification", async (msg) => {
     if (!msg) return;
+  
 
     try {
       const { email, token } = JSON.parse(msg.content.toString());

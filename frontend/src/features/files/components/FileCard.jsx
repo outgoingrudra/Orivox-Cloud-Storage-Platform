@@ -7,6 +7,7 @@ import {
   FilePenLine,
   LoaderCircle,
   MoreVertical,
+  MoveRight,
   Trash2,
 } from "lucide-react";
 
@@ -19,6 +20,7 @@ import { useTrashFile } from "@/features/files/useTrashFile";
 import { useDownloadFile } from "@/features/files/useDownloadFile";
 
 import RenameModal from "@/features/files/components/RenameModal";
+import MoveModal from "@/features/files/components/MoveModal";
 
 import {
   formatBytes,
@@ -38,6 +40,9 @@ export default function FileCard({
   const [renameOpen, setRenameOpen] =
     useState(false);
 
+  const [moveOpen, setMoveOpen] =
+    useState(false);
+
   const [error, setError] =
     useState("");
 
@@ -48,11 +53,7 @@ export default function FileCard({
     useTrashFile();
 
   async function handleDownload() {
-    if (
-      downloadMutation.isPending
-    ) {
-      return;
-    }
+    if (downloadMutation.isPending) return;
 
     setError("");
 
@@ -73,9 +74,7 @@ export default function FileCard({
       }
 
       setMenuOpen(false);
-
-      window.location.href =
-        downloadUrl;
+      window.location.href = downloadUrl;
     } catch (error) {
       console.error(
         "Download failed:",
@@ -90,11 +89,7 @@ export default function FileCard({
   }
 
   async function handleTrash() {
-    if (
-      trashMutation.isPending
-    ) {
-      return;
-    }
+    if (trashMutation.isPending) return;
 
     const confirmed =
       window.confirm(
@@ -122,6 +117,11 @@ export default function FileCard({
   function handleRename() {
     setMenuOpen(false);
     setRenameOpen(true);
+  }
+
+  function handleMove() {
+    setMenuOpen(false);
+    setMoveOpen(true);
   }
 
   return (
@@ -174,16 +174,12 @@ export default function FileCard({
               className="btn btn-ghost btn-circle btn-sm opacity-50 transition group-hover:opacity-100"
               aria-label={`Actions for ${file.name}`}
             >
-              <MoreVertical
-                size={17}
-              />
+              <MoreVertical size={17} />
             </motion.button>
 
             <AnimatePresence>
               {menuOpen && (
                 <>
-                  {/* OUTSIDE CLICK */}
-
                   <button
                     type="button"
                     aria-label="Close file actions"
@@ -218,15 +214,9 @@ export default function FileCard({
 
                     <motion.button
                       type="button"
-                      whileHover={{
-                        x: 3,
-                      }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleDownload
-                      }
+                      whileHover={{ x: 3 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={handleDownload}
                       disabled={
                         downloadMutation.isPending
                       }
@@ -238,9 +228,7 @@ export default function FileCard({
                           className="animate-spin"
                         />
                       ) : (
-                        <Download
-                          size={16}
-                        />
+                        <Download size={16} />
                       )}
 
                       {downloadMutation.isPending
@@ -252,22 +240,26 @@ export default function FileCard({
 
                     <motion.button
                       type="button"
-                      whileHover={{
-                        x: 3,
-                      }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleRename
-                      }
+                      whileHover={{ x: 3 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={handleRename}
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
                     >
-                      <FilePenLine
-                        size={16}
-                      />
-
+                      <FilePenLine size={16} />
                       Rename
+                    </motion.button>
+
+                    {/* MOVE */}
+
+                    <motion.button
+                      type="button"
+                      whileHover={{ x: 3 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={handleMove}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
+                    >
+                      <MoveRight size={16} />
+                      Move
                     </motion.button>
 
                     <div className="my-1 border-t border-base-300" />
@@ -276,15 +268,9 @@ export default function FileCard({
 
                     <motion.button
                       type="button"
-                      whileHover={{
-                        x: 3,
-                      }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleTrash
-                      }
+                      whileHover={{ x: 3 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={handleTrash}
                       disabled={
                         trashMutation.isPending
                       }
@@ -296,9 +282,7 @@ export default function FileCard({
                           className="animate-spin"
                         />
                       ) : (
-                        <Trash2
-                          size={16}
-                        />
+                        <Trash2 size={16} />
                       )}
 
                       {trashMutation.isPending
@@ -312,17 +296,13 @@ export default function FileCard({
           </div>
         </div>
 
-        {/* ==================== FILE INFO ==================== */}
-
         <p className="mt-5 truncate font-semibold">
           {file.name}
         </p>
 
         <div className="mt-1 flex gap-2 text-xs opacity-40">
           <span>
-            {formatBytes(
-              file.size
-            )}
+            {formatBytes(file.size)}
           </span>
 
           <span>•</span>
@@ -333,8 +313,6 @@ export default function FileCard({
             ).toLocaleDateString()}
           </span>
         </div>
-
-        {/* ==================== ERROR ==================== */}
 
         {error && (
           <motion.p
@@ -353,12 +331,19 @@ export default function FileCard({
         )}
       </motion.article>
 
-      {/* ==================== RENAME MODAL ==================== */}
-
       <RenameModal
         open={renameOpen}
         onClose={() =>
           setRenameOpen(false)
+        }
+        item={file}
+        type="file"
+      />
+
+      <MoveModal
+        open={moveOpen}
+        onClose={() =>
+          setMoveOpen(false)
         }
         item={file}
         type="file"

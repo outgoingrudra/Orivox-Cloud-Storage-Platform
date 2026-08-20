@@ -16,7 +16,6 @@ export const publishVerificationEmail = ({ email, token }) => {
     }
   );
 };
-
 export const publishPasswordResetEmail = ({ email, token }) => {
   const channel = getChannel();
 

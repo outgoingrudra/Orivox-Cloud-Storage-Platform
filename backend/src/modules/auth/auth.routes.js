@@ -11,6 +11,7 @@ import {
   resendVerification,
   forgotPasswordController,
   resetPasswordController,
+  updateMe
 } from "./auth.controller.js";
 
 import { requireAuth } from "../../middlewares/auth.middleware.js";
@@ -50,5 +51,13 @@ router.get("/me", requireAuth, me);
 // ==================== EMAIL VERIFICATION ====================
 
 router.get("/verify-email", verifyEmailController);
+// ==================== USER ====================
 
+router.get("/me", requireAuth, me);
+
+router.patch(
+  "/me",
+  requireAuth,
+  updateMe
+);
 export default router;

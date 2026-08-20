@@ -33,56 +33,99 @@ const generateAccessToken = (userId) =>
 
 // ==================== REGISTER ====================
 
-export const registerUser = async ({ name, email, password }) => {
+export const registerUser = async ({
+  name,
+  email,
+  password,
+}) => {
   const existingUser = await prisma.user.findUnique({
     where: { email },
+
     select: {
       id: true,
     },
   });
 
   if (existingUser) {
-    throw new AppError("User already exists", 409);
+    throw new AppError(
+      "User already exists",
+      409
+    );
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await bcrypt.hash(
+    password,
+    12
+  );
 
-  const { token, tokenHash } = generateToken();
+  const {
+    token,
+    tokenHash,
+  } = generateToken();
 
   // User + verification token created atomically
-  const user = await prisma.$transaction(async (tx) => {
-    const createdUser = await tx.user.create({
-      data: {
-        name,
-        email,
-        passwordHash,
-      },
+  const user = await prisma.$transaction(
+    async (tx) => {
+      const createdUser =
+        await tx.user.create({
+          data: {
+            name,
+            email,
+            passwordHash,
+          },
 
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        isVerified: true,
-        createdAt: true,
-      },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            isVerified: true,
+            createdAt: true,
+          },
+        });
+
+      await tx.emailVerificationToken.create({
+        data: {
+          tokenHash,
+          userId: createdUser.id,
+
+          expiresAt: new Date(
+            Date.now() +
+              EMAIL_VERIFICATION_EXPIRY
+          ),
+        },
+      });
+
+      return createdUser;
+    }
+  );
+
+  /*
+    Publishing email is intentionally outside
+    the DB transaction.
+
+    Database work should not stay open while
+    interacting with RabbitMQ.
+  */
+  try {
+    publishVerificationEmail({
+      email: user.email,
+      token,
     });
+  } catch (error) {
+    /*
+      Registration has already succeeded.
 
-    await tx.emailVerificationToken.create({
-      data: {
-        tokenHash,
-        userId: createdUser.id,
+      Do not delete the user just because
+      the queue is temporarily unavailable.
 
-        expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_EXPIRY),
-      },
-    });
-
-    return createdUser;
-  });
-
-  publishVerificationEmail({
-    email: user.email,
-    token,
-  });
+      The user can request another
+      verification email later.
+    */
+    console.error(
+      "Unable to queue verification email:",
+      error.message
+    );
+  }
 
   return user;
 };
@@ -405,4 +448,29 @@ export const resetPassword = async ({ token, password }) => {
       },
     }),
   ]);
+};
+
+export const updateUserProfile = async ({
+  userId,
+  name,
+}) => {
+  const user = await prisma.user.update({
+    where: {
+      id: userId,
+    },
+
+    data: {
+      name,
+    },
+
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      isVerified: true,
+      createdAt: true,
+    },
+  });
+
+  return user;
 };

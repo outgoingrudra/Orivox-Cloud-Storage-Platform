@@ -4,6 +4,7 @@ import {
   resendVerificationSchema,
   forgotPasswordSchema,
   resetPasswordSchema,
+  updateMeSchema
 } from "./auth.validator.js";
 
 import {
@@ -17,6 +18,7 @@ import {
   resendVerificationEmail,
   forgotPassword,
   resetPassword,
+  updateUserProfile
 } from "./auth.service.js";
 
 import { asyncHandler } from "../../utils/asyncHandler.js";
@@ -261,6 +263,36 @@ export const resetPasswordController = asyncHandler(
       success: true,
       message:
         "Password reset successfully. Please login again.",
+    });
+  }
+);
+
+export const updateMe = asyncHandler(
+  async (req, res) => {
+    const result =
+      updateMeSchema.safeParse(
+        req.body
+      );
+
+    if (!result.success) {
+      throw new AppError(
+        result.error.issues[0].message,
+        400
+      );
+    }
+
+    const user =
+      await updateUserProfile({
+        userId: req.user.id,
+        name: result.data.name,
+      });
+
+    return res.status(200).json({
+      success: true,
+      message: "Profile updated successfully.",
+      data: {
+        user,
+      },
     });
   }
 );

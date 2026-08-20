@@ -17,6 +17,7 @@ import CreateFolderModal from "@/features/files/components/CreateFolderModal";
 import UploadModal from "@/features/files/components/UploadModal";
 
 export default function FilesPage() {
+  
   const router = useRouter();
   const searchParams = useSearchParams();
 

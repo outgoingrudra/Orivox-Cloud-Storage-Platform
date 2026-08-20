@@ -7,6 +7,7 @@ import {
   Folder,
   LoaderCircle,
   MoreVertical,
+  MoveRight,
   Trash2,
 } from "lucide-react";
 
@@ -16,18 +17,29 @@ import {
 } from "framer-motion";
 
 import { useTrashFolder } from "@/features/files/useTrashFolder";
+
 import RenameModal from "@/features/files/components/RenameModal";
+import MoveModal from "@/features/files/components/MoveModal";
 
 export default function FolderCard({
   folder,
   index,
   onOpen,
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [error, setError] = useState("");
+  const [menuOpen, setMenuOpen] =
+    useState(false);
 
-  const trashMutation = useTrashFolder();
+  const [renameOpen, setRenameOpen] =
+    useState(false);
+
+  const [moveOpen, setMoveOpen] =
+    useState(false);
+
+  const [error, setError] =
+    useState("");
+
+  const trashMutation =
+    useTrashFolder();
 
   const folderCount =
     folder._count?.folders ??
@@ -42,16 +54,20 @@ export default function FolderCard({
   async function handleTrash() {
     if (trashMutation.isPending) return;
 
-    const confirmed = window.confirm(
-      `Move "${folder.name}" to trash?`
-    );
+    const confirmed =
+      window.confirm(
+        `Move "${folder.name}" to trash?`
+      );
 
     if (!confirmed) return;
 
     setError("");
 
     try {
-      await trashMutation.mutateAsync(folder.id);
+      await trashMutation.mutateAsync(
+        folder.id
+      );
+
       setMenuOpen(false);
     } catch (error) {
       setError(
@@ -66,38 +82,70 @@ export default function FolderCard({
     setRenameOpen(true);
   }
 
+  function handleMove() {
+    setMenuOpen(false);
+    setMoveOpen(true);
+  }
+
   return (
     <>
       <motion.article
-        initial={{ opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: index * 0.04 }}
-        whileHover={{ y: -4, scale: 1.01 }}
-        onDoubleClick={() => onOpen(folder.id)}
+        initial={{
+          opacity: 0,
+          y: 18,
+        }}
+        animate={{
+          opacity: 1,
+          y: 0,
+        }}
+        transition={{
+          delay: index * 0.04,
+        }}
+        whileHover={{
+          y: -4,
+          scale: 1.01,
+        }}
+        onDoubleClick={() =>
+          onOpen(folder.id)
+        }
         className="group relative cursor-pointer rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm transition"
       >
         <div className="flex items-start justify-between">
           <motion.button
             type="button"
-            whileHover={{ scale: 1.08, rotate: -3 }}
-            whileTap={{ scale: 0.95 }}
-            onClick={() => onOpen(folder.id)}
+            whileHover={{
+              scale: 1.08,
+              rotate: -3,
+            }}
+            whileTap={{
+              scale: 0.95,
+            }}
+            onClick={() =>
+              onOpen(folder.id)
+            }
             className="flex h-11 w-11 items-center justify-center rounded-xl bg-base-200"
             aria-label={`Open ${folder.name}`}
           >
             <Folder size={21} />
           </motion.button>
 
-          {/* ACTION MENU */}
+          {/* ==================== ACTION MENU ==================== */}
 
           <div className="relative">
             <motion.button
               type="button"
-              whileHover={{ scale: 1.08 }}
-              whileTap={{ scale: 0.9 }}
+              whileHover={{
+                scale: 1.08,
+              }}
+              whileTap={{
+                scale: 0.9,
+              }}
               onClick={(event) => {
                 event.stopPropagation();
-                setMenuOpen((value) => !value);
+
+                setMenuOpen(
+                  (value) => !value
+                );
               }}
               className="btn btn-ghost btn-circle btn-sm opacity-50 transition group-hover:opacity-100"
               aria-label={`Actions for ${folder.name}`}
@@ -134,7 +182,9 @@ export default function FolderCard({
                       y: -4,
                       scale: 0.96,
                     }}
-                    transition={{ duration: 0.16 }}
+                    transition={{
+                      duration: 0.16,
+                    }}
                     onClick={(event) =>
                       event.stopPropagation()
                     }
@@ -153,6 +203,19 @@ export default function FolderCard({
                       Rename
                     </motion.button>
 
+                    {/* MOVE */}
+
+                    <motion.button
+                      type="button"
+                      whileHover={{ x: 3 }}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={handleMove}
+                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
+                    >
+                      <MoveRight size={16} />
+                      Move
+                    </motion.button>
+
                     <div className="my-1 border-t border-base-300" />
 
                     {/* TRASH */}
@@ -162,7 +225,9 @@ export default function FolderCard({
                       whileHover={{ x: 3 }}
                       whileTap={{ scale: 0.97 }}
                       onClick={handleTrash}
-                      disabled={trashMutation.isPending}
+                      disabled={
+                        trashMutation.isPending
+                      }
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-error transition hover:bg-error/10"
                     >
                       {trashMutation.isPending ? (
@@ -187,7 +252,9 @@ export default function FolderCard({
 
         <button
           type="button"
-          onClick={() => onOpen(folder.id)}
+          onClick={() =>
+            onOpen(folder.id)
+          }
           className="mt-5 block w-full truncate text-left font-semibold hover:underline"
         >
           {folder.name}
@@ -214,12 +281,19 @@ export default function FolderCard({
         )}
       </motion.article>
 
-      {/* RENAME MODAL */}
-
       <RenameModal
         open={renameOpen}
         onClose={() =>
           setRenameOpen(false)
+        }
+        item={folder}
+        type="folder"
+      />
+
+      <MoveModal
+        open={moveOpen}
+        onClose={() =>
+          setMoveOpen(false)
         }
         item={folder}
         type="folder"
