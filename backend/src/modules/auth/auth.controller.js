@@ -5,7 +5,8 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   updateMeSchema,
-  sessionIdParamSchema
+  sessionIdParamSchema,
+  changePasswordSchema,
 } from "./auth.validator.js";
 
 import {
@@ -21,7 +22,8 @@ import {
   resetPassword,
   updateUserProfile,
   getActiveSessions,
-  revokeSession
+  revokeSession,
+  changePassword,
 } from "./auth.service.js";
 
 import { asyncHandler } from "../../utils/asyncHandler.js";
@@ -34,10 +36,7 @@ export const register = asyncHandler(async (req, res) => {
   const result = registerSchema.safeParse(req.body);
 
   if (!result.success) {
-    throw new AppError(
-      result.error.issues[0].message,
-      400
-    );
+    throw new AppError(result.error.issues[0].message, 400);
   }
 
   const user = await registerUser(result.data);
@@ -57,22 +56,20 @@ export const verifyEmailController = async (req, res) => {
 
     if (!token) {
       return res.redirect(
-        `${process.env.FRONTEND_URL}/email-verified?status=invalid`
+        `${process.env.FRONTEND_URL}/email-verified?status=invalid`,
       );
     }
 
     await verifyEmail(token);
 
     return res.redirect(
-      `${process.env.FRONTEND_URL}/email-verified?status=success`
+      `${process.env.FRONTEND_URL}/email-verified?status=success`,
     );
   } catch (error) {
-    const status = error.message.includes("expired")
-      ? "expired"
-      : "invalid";
+    const status = error.message.includes("expired") ? "expired" : "invalid";
 
     return res.redirect(
-      `${process.env.FRONTEND_URL}/email-verified?status=${status}`
+      `${process.env.FRONTEND_URL}/email-verified?status=${status}`,
     );
   }
 };
@@ -83,27 +80,16 @@ export const login = asyncHandler(async (req, res) => {
   const result = loginSchema.safeParse(req.body);
 
   if (!result.success) {
-    throw new AppError(
-      result.error.issues[0].message,
-      400
-    );
+    throw new AppError(result.error.issues[0].message, 400);
   }
 
-  const {
-    user,
-    accessToken,
-    refreshToken,
-  } = await loginUser({
+  const { user, accessToken, refreshToken } = await loginUser({
     ...result.data,
     userAgent: req.get("user-agent"),
     ipAddress: req.ip,
   });
 
-  res.cookie(
-    "refreshToken",
-    refreshToken,
-    refreshCookieOptions
-  );
+  res.cookie("refreshToken", refreshToken, refreshCookieOptions);
 
   return res.status(200).json({
     success: true,
@@ -121,14 +107,10 @@ export const refresh = asyncHandler(async (req, res) => {
   const refreshToken = req.cookies?.refreshToken;
 
   if (!refreshToken) {
-    throw new AppError(
-      "Refresh token missing",
-      401
-    );
+    throw new AppError("Refresh token missing", 401);
   }
 
-  const accessToken =
-    await refreshAccessToken(refreshToken);
+  const accessToken = await refreshAccessToken(refreshToken);
 
   return res.status(200).json({
     success: true,
@@ -193,163 +175,155 @@ export const logoutAll = asyncHandler(async (req, res) => {
 
 // ==================== RESEND VERIFICATION ====================
 
-export const resendVerification = asyncHandler(
-  async (req, res) => {
-    const result =
-      resendVerificationSchema.safeParse(req.body);
+export const resendVerification = asyncHandler(async (req, res) => {
+  const result = resendVerificationSchema.safeParse(req.body);
 
-    if (!result.success) {
-      throw new AppError(
-        result.error.issues[0].message,
-        400
-      );
-    }
-
-    await resendVerificationEmail(
-      result.data.email
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Verification email sent",
-    });
+  if (!result.success) {
+    throw new AppError(result.error.issues[0].message, 400);
   }
-);
+
+  await resendVerificationEmail(result.data.email);
+
+  return res.status(200).json({
+    success: true,
+    message: "Verification email sent",
+  });
+});
 
 // ==================== FORGOT PASSWORD ====================
 
-export const forgotPasswordController = asyncHandler(
-  async (req, res) => {
-    const result =
-      forgotPasswordSchema.safeParse(req.body);
+export const forgotPasswordController = asyncHandler(async (req, res) => {
+  const result = forgotPasswordSchema.safeParse(req.body);
 
-    if (!result.success) {
-      throw new AppError(
-        result.error.issues[0].message,
-        400
-      );
-    }
-
-    await forgotPassword(result.data.email);
-
-    return res.status(200).json({
-      success: true,
-      message:
-        "If an account exists with this email, a password reset link has been sent.",
-    });
+  if (!result.success) {
+    throw new AppError(result.error.issues[0].message, 400);
   }
-);
+
+  await forgotPassword(result.data.email);
+
+  return res.status(200).json({
+    success: true,
+    message:
+      "If an account exists with this email, a password reset link has been sent.",
+  });
+});
 
 // ==================== RESET PASSWORD ====================
 
-export const resetPasswordController = asyncHandler(
-  async (req, res) => {
-    const result =
-      resetPasswordSchema.safeParse(req.body);
+export const resetPasswordController = asyncHandler(async (req, res) => {
+  const result = resetPasswordSchema.safeParse(req.body);
 
-    if (!result.success) {
-      throw new AppError(
-        result.error.issues[0].message,
-        400
-      );
-    }
-
-    await resetPassword(result.data);
-
-    res.clearCookie("refreshToken", {
-      httpOnly: true,
-      secure: refreshCookieOptions.secure,
-      sameSite: refreshCookieOptions.sameSite,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message:
-        "Password reset successfully. Please login again.",
-    });
+  if (!result.success) {
+    throw new AppError(result.error.issues[0].message, 400);
   }
-);
 
-export const updateMe = asyncHandler(
-  async (req, res) => {
-    const result =
-      updateMeSchema.safeParse(
-        req.body
-      );
+  await resetPassword(result.data);
 
-    if (!result.success) {
-      throw new AppError(
-        result.error.issues[0].message,
-        400
-      );
-    }
-
-    const user =
-      await updateUserProfile({
-        userId: req.user.id,
-        name: result.data.name,
-      });
-
-    return res.status(200).json({
-      success: true,
-      message: "Profile updated successfully.",
-      data: {
-        user,
-      },
-    });
-  }
-);
-
-
-export const sessions = asyncHandler(
-  async (req, res) => {
-    const activeSessions =
-      await getActiveSessions({
-        userId: req.user.id,
-      });
-
-    const sessionsWithCurrent =
-      activeSessions.map((session) => ({
-        ...session,
-        current:
-          session.id ===
-          req.user.sessionId,
-      }));
-
-    return res.status(200).json({
-      success: true,
-
-      data: {
-        sessions: sessionsWithCurrent,
-        count:
-          sessionsWithCurrent.length,
-      },
-    });
-  }
-);
-
-export const revokeSessionController =asyncHandler(async (req, res) => {
-    const result =
-      sessionIdParamSchema.safeParse(
-        req.params
-      );
-
-    if (!result.success) {
-      throw new AppError(
-        result.error.issues[0].message,
-        400
-      );
-    }
-
-    await revokeSession({
-      userId: req.user.id,
-      sessionId:
-        result.data.sessionId,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message:
-        "Session revoked successfully.",
-    });
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: refreshCookieOptions.secure,
+    sameSite: refreshCookieOptions.sameSite,
   });
+
+  return res.status(200).json({
+    success: true,
+    message: "Password reset successfully. Please login again.",
+  });
+});
+
+export const updateMe = asyncHandler(async (req, res) => {
+  const result = updateMeSchema.safeParse(req.body);
+
+  if (!result.success) {
+    throw new AppError(result.error.issues[0].message, 400);
+  }
+
+  const user = await updateUserProfile({
+    userId: req.user.id,
+    name: result.data.name,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Profile updated successfully.",
+    data: {
+      user,
+    },
+  });
+});
+
+export const sessions = asyncHandler(async (req, res) => {
+  const activeSessions = await getActiveSessions({
+    userId: req.user.id,
+  });
+
+  const sessionsWithCurrent = activeSessions.map((session) => ({
+    ...session,
+    current: session.id === req.user.sessionId,
+  }));
+
+  return res.status(200).json({
+    success: true,
+
+    data: {
+      sessions: sessionsWithCurrent,
+      count: sessionsWithCurrent.length,
+    },
+  });
+});
+
+export const revokeSessionController = asyncHandler(async (req, res) => {
+  const result = sessionIdParamSchema.safeParse(req.params);
+
+  if (!result.success) {
+    throw new AppError(result.error.issues[0].message, 400);
+  }
+
+  await revokeSession({
+    userId: req.user.id,
+    sessionId: result.data.sessionId,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Session revoked successfully.",
+  });
+});
+
+export const logoutOtherSessions = asyncHandler(async (req, res) => {
+  const revokedCount = await revokeOtherSessions({
+    userId: req.user.id,
+    currentSessionId: req.user.sessionId,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Other sessions signed out successfully.",
+    data: {
+      revokedCount,
+    },
+  });
+});
+
+export const changePasswordController = asyncHandler(async (req, res) => {
+  const result = changePasswordSchema.safeParse(req.body);
+
+  if (!result.success) {
+    throw new AppError(result.error.issues[0].message, 400);
+  }
+
+  await changePassword({
+    userId: req.user.id,
+
+    currentSessionId: req.user.sessionId,
+
+    currentPassword: result.data.currentPassword,
+
+    newPassword: result.data.newPassword,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Password changed successfully.",
+  });
+});

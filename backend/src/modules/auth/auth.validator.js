@@ -84,3 +84,25 @@ export const sessionIdParamSchema = z.object({
     .trim()
     .min(1, "Session ID is required."),
 });
+
+
+export const changePasswordSchema =
+  z.object({
+    currentPassword: z
+      .string()
+      .min(
+        1,
+        "Current password is required."
+      ),
+
+    newPassword: z
+      .string()
+      .min(
+        8,
+        "New password must contain at least 8 characters."
+      )
+      .max(
+        100,
+        "Password cannot exceed 100 characters."
+      ),
+  });

@@ -607,3 +607,98 @@ export const revokeSession = async ({
     },
   });
 };
+
+
+export const revokeOtherSessions = async ({
+  userId,
+  currentSessionId,
+}) => {
+  const result =
+    await prisma.session.updateMany({
+      where: {
+        userId,
+
+        id: {
+          not: currentSessionId,
+        },
+
+        revokedAt: null,
+      },
+
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+  return result.count;
+};
+
+export const changePassword = async ({
+  userId,
+  currentSessionId,
+  currentPassword,
+  newPassword,
+}) => {
+  const user = await prisma.user.findUnique({
+    where: {
+      id: userId,
+    },
+    select: {
+      id: true,
+      passwordHash: true,
+    },
+  });
+
+  if (!user) {
+    throw new AppError(
+      "User not found.",
+      404
+    );
+  }
+
+  const validPassword =
+    await bcrypt.compare(
+      currentPassword,
+      user.passwordHash
+    );
+
+  if (!validPassword) {
+    throw new AppError(
+      "Current password is incorrect.",
+      400
+    );
+  }
+
+  const samePassword =
+    await bcrypt.compare(
+      newPassword,
+      user.passwordHash
+    );
+
+  if (samePassword) {
+    throw new AppError(
+      "New password must be different from your current password.",
+      400
+    );
+  }
+
+  const passwordHash =
+    await bcrypt.hash(
+      newPassword,
+      12
+    );
+
+  await prisma.user.update({
+    where: {
+      id: userId,
+    },
+    data: {
+      passwordHash,
+    },
+  });
+
+  await revokeOtherSessions({
+    userId,
+    currentSessionId,
+  });
+};

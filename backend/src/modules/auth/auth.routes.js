@@ -12,8 +12,10 @@ import {
   forgotPasswordController,
   resetPasswordController,
   updateMe,
-   sessions,
-   revokeSessionController
+  sessions,
+  revokeSessionController,
+  logoutOtherSessions,
+  changePasswordController
 } from "./auth.controller.js";
 
 import { requireAuth } from "../../middlewares/auth.middleware.js";
@@ -37,6 +39,11 @@ router.post("/resend-verification", emailLimiter, resendVerification);
 router.post("/forgot-password", emailLimiter, forgotPasswordController);
 
 router.post("/reset-password", loginLimiter, resetPasswordController);
+router.patch(
+  "/change-password",
+  requireAuth,
+  changePasswordController
+);
 
 // ==================== SESSION ====================
 
@@ -45,17 +52,9 @@ router.post("/refresh", refresh);
 router.post("/logout", logout);
 
 router.post("/logout-all", requireAuth, logoutAll);
-
-router.get(
-  "/sessions",
-  requireAuth,
-  sessions
-);
-router.delete(
-  "/sessions/:sessionId",
-  requireAuth,
-  revokeSessionController
-);
+router.post("/logout-others", requireAuth, logoutOtherSessions);
+router.get("/sessions", requireAuth, sessions);
+router.delete("/sessions/:sessionId", requireAuth, revokeSessionController);
 
 // ==================== USER ====================
 
@@ -68,9 +67,5 @@ router.get("/verify-email", verifyEmailController);
 
 router.get("/me", requireAuth, me);
 
-router.patch(
-  "/me",
-  requireAuth,
-  updateMe
-);
+router.patch("/me", requireAuth, updateMe);
 export default router;
