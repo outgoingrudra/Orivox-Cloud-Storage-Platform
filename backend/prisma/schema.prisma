@@ -35,6 +35,8 @@ model User {
 
   fileShareLinks   FileShareLink[]   @relation("FileShareLinkCreator")
   folderShareLinks FolderShareLink[] @relation("FolderShareLinkCreator")
+  apiKeys  ApiKey[]
+  apiUsage ApiUsage[]
 }
 
 model EmailVerificationToken {
@@ -312,4 +314,40 @@ model StorageDeletionJob {
   @@index([status])
   @@index([userId])
   @@index([createdAt])
+}
+
+model ApiKey {
+  id        String   @id @default(cuid())
+  name      String
+  keyHash   String   @unique
+  keyPrefix String
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([userId, revokedAt])
+}
+
+model ApiUsage {
+  id String @id @default(cuid())
+
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  year     Int
+  month    Int
+  requests Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, year, month])
+  @@index([userId])
 }

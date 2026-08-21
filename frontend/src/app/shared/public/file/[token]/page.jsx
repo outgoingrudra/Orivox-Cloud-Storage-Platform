@@ -13,13 +13,13 @@ import {
 
 import { motion } from "framer-motion";
 
-import { usePublicFile } from "@/features/share/usePublicFile";
-import { usePublicFileDownload } from "@/features/share/usePublicFileDownload";
+import { usePublicFile } from "@/components/features/share/usePublicFile";
+import { usePublicFileDownload } from "@/components/features/share/usePublicFileDownload";
 
 import {
   formatBytes,
   getFileIcon,
-} from "@/features/files/file.utils";
+} from "@/components/features/files/file.utils";
 
 export default function PublicFilePage({
   params,

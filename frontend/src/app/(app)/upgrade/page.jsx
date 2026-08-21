@@ -14,8 +14,8 @@ import {
 
 import { motion } from "framer-motion";
 
-import { useDashboard } from "@/features/dashboard/useDashboard";
-import { formatBytes } from "@/features/files/file.utils";
+import { useDashboard } from "@/components/features/dashboard/useDashboard";
+import { formatBytes } from "@/components/features/files/file.utils";
 
 const plans = [
   {

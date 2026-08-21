@@ -18,16 +18,16 @@ import {
 
 import { motion } from "framer-motion";
 
-import { useTrash } from "@/features/files/useTrash";
-import { useRestoreFile } from "@/features/files/useRestoreFile";
-import { useRestoreFolder } from "@/features/files/useRestoreFolder";
-import { useDeleteFilePermanently } from "@/features/files/useDeleteFilePermanently";
-import { useDeleteFolderPermanently } from "@/features/files/useDeleteFolderPermanently";
+import { useTrash } from "@/components/features/files/useTrash";
+import { useRestoreFile } from "@/components/features/files/useRestoreFile";
+import { useRestoreFolder } from "@/components/features/files/useRestoreFolder";
+import { useDeleteFilePermanently } from "@/components/features/files/useDeleteFilePermanently";
+import { useDeleteFolderPermanently } from "@/components/features/files/useDeleteFolderPermanently";
 
 import {
   formatBytes,
   getFileIcon,
-} from "@/features/files/file.utils";
+} from "@/components/features/files/file.utils";
 
 export default function TrashPage() {
   const {

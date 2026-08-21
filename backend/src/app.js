@@ -6,12 +6,13 @@ import morgan from "morgan";
 import shareRoutes from "./modules/share/share.routes.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import fileRoutes from "./modules/file/file.routes.js";
-import { globalLimiter } from "./middlewares/rateLimit.middleware.js";
+import { globalLimiter , developerLimiter } from "./middlewares/rateLimit.middleware.js";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes.js";
 import { notFound, errorHandler } from "./middlewares/error.middleware.js";
 import folderRoutes from "./modules/folder/folder.routes.js";
 import trashRoutes from "./modules/trash/trash.routes.js";
 import searchRoutes from "./modules/search/search.routes.js";
+import developerRoutes from "./modules/developer/developer.routes.js";
 const app = express();
 
 
@@ -47,6 +48,8 @@ app.get("/api/v1/health", (req, res) => {
   });
 });
 
+
+app.use("/api/v1/developer", developerLimiter, developerRoutes);
 // ==================== GLOBAL RATE LIMIT ====================
 app.use("/api/v1", globalLimiter);
 // ==================== ROUTES ====================

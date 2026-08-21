@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSelector } from "react-redux";
-import { useDashboard } from "@/features/dashboard/useDashboard";
+import { useDashboard } from "@/components/features/dashboard/useDashboard";
 import {
   Gauge,
   Files,
@@ -15,6 +15,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Search,
+  Code2
 } from "lucide-react";
 
 import { AnimatePresence, motion } from "framer-motion";
@@ -50,6 +51,11 @@ const navItems = [
     href: "/upgrade",
     icon: HardDrive,
   },
+  {
+  label: "Developer Zone",
+  href: "/developer",
+  icon: Code2,
+},
 ];
 
 export default function Sidebar({

@@ -16,14 +16,14 @@ import {
 
 import { motion } from "framer-motion";
 
-import { usePublicFolder } from "@/features/share/usePublicFolder";
-import { usePublicFolderContents } from "@/features/share/usePublicFolderContents";
-import { usePublicFolderFileDownload } from "@/features/share/usePublicFolderFileDownload";
+import { usePublicFolder } from "@/components/features/share/usePublicFolder";
+import { usePublicFolderContents } from "@/components/features/share/usePublicFolderContents";
+import { usePublicFolderFileDownload } from "@/components/features/share/usePublicFolderFileDownload";
 
 import {
   formatBytes,
   getFileIcon,
-} from "@/features/files/file.utils";
+} from "@/components/features/files/file.utils";
 
 export default function PublicFolderPage({
   params,

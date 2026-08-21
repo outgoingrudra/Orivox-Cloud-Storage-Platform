@@ -1,10 +1,10 @@
 "use client";
 
-import SettingsHeader from "@/features/settings/components/SettingsHeader";
-import ProfileSettings from "@/features/settings/components/ProfileSettings";
-import SecuritySettings from "@/features/settings/components/SecuritySettings";
-import AppearanceSettings from "@/features/settings/components/AppearanceSettings";
-import StorageSettings from "@/features/settings/components/StorageSettings";
+import SettingsHeader from "@/components/features/settings/components/SettingsHeader";
+import ProfileSettings from "@/components/features/settings/components/ProfileSettings";
+import SecuritySettings from "@/components/features/settings/components/SecuritySettings";
+import AppearanceSettings from "@/components/features/settings/components/AppearanceSettings";
+import StorageSettings from "@/components/features/settings/components/StorageSettings";
 
 export default function SettingsPage() {
   return (

@@ -15,8 +15,8 @@ import {
   motion,
 } from "framer-motion";
 
-import { useUploadFile } from "@/features/files/useUploadFile";
-import { formatBytes } from "@/features/files/file.utils";
+import { useUploadFile } from "@/components/features/files/useUploadFile";
+import { formatBytes } from "@/components/features/files/file.utils";
 
 export default function UploadModal({
   open,

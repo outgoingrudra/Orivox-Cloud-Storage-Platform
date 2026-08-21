@@ -39,3 +39,16 @@ export const emailLimiter = rateLimit({
     message: "Too many email requests. Please try again later.",
   },
 });
+
+export const developerLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+
+  message: {
+    success: false,
+    message: "Developer API rate limit exceeded. Try again shortly.",
+  },
+});

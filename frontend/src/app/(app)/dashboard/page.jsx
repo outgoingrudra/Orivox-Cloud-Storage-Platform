@@ -18,7 +18,7 @@ import {
 
 import { motion } from "framer-motion";
 
-import { useDashboard } from "@/features/dashboard/useDashboard";
+import { useDashboard } from "@/components/features/dashboard/useDashboard";
 
 function formatBytes(bytes = 0) {
   if (!bytes) return "0 B";
@@ -160,7 +160,6 @@ export default function DashboardPage() {
           </p>
         </div>
 
-       
       </motion.section>
 
       {/* ==================== OVERVIEW ==================== */}

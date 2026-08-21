@@ -12,7 +12,7 @@ import { motion } from "framer-motion";
 import {
   formatBytes,
   getFileIcon,
-} from "@/features/files/file.utils";
+} from "@/components/features/files/file.utils";
 
 export default function SharedFileCard({
   share,
