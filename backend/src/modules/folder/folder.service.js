@@ -6,6 +6,7 @@ import { findOwnedFolder, getValidRestoreParent } from "./folder.helper.js";
 import { DeleteObjectsCommand } from "@aws-sdk/client-s3";
 
 import { storageClient, STORAGE_BUCKET } from "../../config/storage.js";
+import { invalidateDashboardCache } from "../dashboard/dashboard.cache.js";
 
 import {
   requireFolderPermission,
@@ -81,7 +82,7 @@ export async function createFolder({ name, parentId, userId }) {
       updatedAt: true,
     },
   });
-
+  await invalidateDashboardCache(ownerId);
   return folder;
 }
 export async function listFolders({
@@ -205,22 +206,21 @@ export async function renameFolder({ folderId, userId, name }) {
     minimum: PERMISSION.EDITOR,
   });
 
-  return prisma.folder.update({
-    where: {
-      id: folderId,
-    },
-
-    data: {
-      name,
-    },
-
+  const folder = await prisma.folder.update({
+    where: { id: folderId },
+    data: { name },
     select: {
       id: true,
       name: true,
       parentId: true,
+      userId: true,
       updatedAt: true,
     },
   });
+
+  await invalidateDashboardCache(folder.userId);
+
+  return folder;
 }
 
 export async function moveFolder({ folderId, userId, parentId }) {
@@ -235,9 +235,7 @@ export async function moveFolder({ folderId, userId, parentId }) {
   // ==================== SOURCE FOLDER ====================
 
   const folder = await prisma.folder.findUnique({
-    where: {
-      id: folderId,
-    },
+    where: { id: folderId },
   });
 
   if (!folder) {
@@ -253,26 +251,18 @@ export async function moveFolder({ folderId, userId, parentId }) {
   // ==================== MOVE TO ROOT ====================
 
   if (!parentId) {
-    /*
-      Only the actual owner can move a folder
-      to their root.
-
-      An EDITOR of somebody else's shared folder
-      cannot move that folder into their own root.
-    */
     if (permission !== PERMISSION.OWNER) {
       throw new AppError("Shared folders cannot be moved to your root", 403);
     }
 
-    return prisma.folder.update({
-      where: {
-        id: folderId,
-      },
-
-      data: {
-        parentId: null,
-      },
+    const movedFolder = await prisma.folder.update({
+      where: { id: folderId },
+      data: { parentId: null },
     });
+
+    await invalidateDashboardCache(folder.userId);
+
+    return movedFolder;
   }
 
   // ==================== DESTINATION PERMISSION ====================
@@ -283,13 +273,10 @@ export async function moveFolder({ folderId, userId, parentId }) {
     minimum: PERMISSION.EDITOR,
   });
 
-  // ==================== DESTINATION FOLDER ====================
+  // ==================== DESTINATION ====================
 
   const destination = await prisma.folder.findUnique({
-    where: {
-      id: parentId,
-    },
-
+    where: { id: parentId },
     select: {
       id: true,
       userId: true,
@@ -302,20 +289,6 @@ export async function moveFolder({ folderId, userId, parentId }) {
 
   // ==================== OWNER CONSISTENCY ====================
 
-  /*
-    Folder trees must never cross owners.
-
-    Example:
-
-    Alice owns A
-    Bob owns B
-
-    A cannot be moved inside B even if the
-    current user has EDITOR permission on both.
-
-    This keeps permission inheritance and
-    storage ownership consistent.
-  */
   if (folder.userId !== destination.userId) {
     throw new AppError(
       "Folder and destination must belong to the same owner",
@@ -325,20 +298,6 @@ export async function moveFolder({ folderId, userId, parentId }) {
 
   // ==================== CYCLE CHECK ====================
 
-  /*
-    Prevent:
-
-    A
-    └── B
-        └── C
-
-    from doing:
-
-    move A → C
-
-    which would create a cycle.
-  */
-
   let currentId = parentId;
 
   while (currentId) {
@@ -347,10 +306,7 @@ export async function moveFolder({ folderId, userId, parentId }) {
     }
 
     const current = await prisma.folder.findUnique({
-      where: {
-        id: currentId,
-      },
-
+      where: { id: currentId },
       select: {
         parentId: true,
       },
@@ -365,15 +321,15 @@ export async function moveFolder({ folderId, userId, parentId }) {
 
   // ==================== MOVE ====================
 
-  return prisma.folder.update({
-    where: {
-      id: folderId,
-    },
-
-    data: {
-      parentId,
-    },
+  const movedFolder = await prisma.folder.update({
+    where: { id: folderId },
+    data: { parentId },
   });
+
+  // DB mutation succeeded → invalidate owner cache
+  await invalidateDashboardCache(folder.userId);
+
+  return movedFolder;
 }
 
 export async function trashFolder({ folderId, userId }) {
@@ -383,10 +339,8 @@ export async function trashFolder({ folderId, userId }) {
     minimum: PERMISSION.OWNER,
   });
 
-  return prisma.folder.update({
-    where: {
-      id: folderId,
-    },
+  const folder = await prisma.folder.update({
+    where: { id: folderId },
 
     data: {
       isTrashed: true,
@@ -396,11 +350,18 @@ export async function trashFolder({ folderId, userId }) {
     select: {
       id: true,
       name: true,
+      userId: true,
       isTrashed: true,
       trashedAt: true,
     },
   });
+
+  // Invalidate only after successful DB update
+  await invalidateDashboardCache(folder.userId);
+
+  return folder;
 }
+
 export async function restoreFolder({ folderId, userId }) {
   await requireFolderPermission({
     folderId,
@@ -410,9 +371,7 @@ export async function restoreFolder({ folderId, userId }) {
   });
 
   const folder = await prisma.folder.findUnique({
-    where: {
-      id: folderId,
-    },
+    where: { id: folderId },
   });
 
   if (!folder) {
@@ -424,17 +383,16 @@ export async function restoreFolder({ folderId, userId }) {
   }
 
   // Check entire ancestor chain.
-  // If any ancestor is trashed/missing,
+  // If an ancestor is trashed/missing,
   // restore this folder to root.
+
   const parentId = await getValidRestoreParent({
     parentId: folder.parentId,
-    userId,
+    userId: folder.userId,
   });
 
-  return prisma.folder.update({
-    where: {
-      id: folderId,
-    },
+  const restoredFolder = await prisma.folder.update({
+    where: { id: folderId },
 
     data: {
       isTrashed: false,
@@ -445,11 +403,16 @@ export async function restoreFolder({ folderId, userId }) {
     select: {
       id: true,
       name: true,
+      userId: true,
       parentId: true,
       isTrashed: true,
       trashedAt: true,
     },
   });
+
+  await invalidateDashboardCache(restoredFolder.userId);
+
+  return restoredFolder;
 }
 
 export const listTrashedFolders = async ({ userId, page, limit }) => {
@@ -534,6 +497,7 @@ async function collectFolderSubtree({ folderId, userId }) {
 
 export async function permanentlyDeleteFolder({ folderId, userId }) {
   // ==================== OWNER ONLY ====================
+
   await requireFolderPermission({
     folderId,
     userId,
@@ -542,9 +506,7 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
   });
 
   const folder = await prisma.folder.findUnique({
-    where: {
-      id: folderId,
-    },
+    where: { id: folderId },
   });
 
   if (!folder) {
@@ -558,19 +520,20 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
     );
   }
 
+  const ownerId = folder.userId;
+
   // ==================== COLLECT SUBTREE ====================
 
   const folderIds = await collectFolderSubtree({
     folderId,
-    userId,
+    userId: ownerId,
   });
 
   // ==================== FIND ALL FILES ====================
 
   const files = await prisma.file.findMany({
     where: {
-      userId,
-
+      userId: ownerId,
       folderId: {
         in: folderIds,
       },
@@ -589,16 +552,9 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
   // ==================== DATABASE TRANSACTION ====================
 
   const deletionJobs = await prisma.$transaction(async (tx) => {
-    /*
-          IMPORTANT:
+    // Prevent deletion while uploads
+    // are targeting this subtree.
 
-          Don't delete folder hierarchy while
-          an upload is actively targeting one
-          of these folders.
-
-          That upload may currently be going
-          through initiate → B2 → confirm.
-        */
     const activeUploads = await tx.uploadReservation.count({
       where: {
         folderId: {
@@ -616,14 +572,9 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
       );
     }
 
-    /*
-          Completed / cancelled / expired
-          reservation records can now be removed.
+    // Remove old reservation records because
+    // UploadReservation.folder uses Restrict.
 
-          This is also necessary because
-          UploadReservation.folder uses
-          onDelete: Restrict.
-        */
     await tx.uploadReservation.deleteMany({
       where: {
         folderId: {
@@ -632,25 +583,17 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
       },
     });
 
-    // ==================== CREATE DELETION JOBS ====================
+    // ==================== DELETION JOBS ====================
 
     const jobs = [];
 
-    /*
-          One physical B2 object
-          = one durable deletion job.
-        */
     for (const file of files) {
       const job = await tx.storageDeletionJob.create({
         data: {
           userId: file.userId,
-
           fileId: file.id,
-
           objectKey: file.objectKey,
-
           size: file.size,
-
           status: "PENDING",
         },
 
@@ -666,7 +609,7 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
 
     await tx.file.deleteMany({
       where: {
-        userId,
+        userId: ownerId,
 
         folderId: {
           in: folderIds,
@@ -674,20 +617,10 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
       },
     });
 
-    // ==================== DELETE FOLDERS BOTTOM-UP ====================
+    // ==================== DELETE FOLDERS ====================
 
-    /*
-          Example:
-
-          A
-          └── B
-              └── C
-
-          Because parent relation uses
-          onDelete: Restrict:
-
-          C → B → A
-        */
+    // Bottom-up because parent relation
+    // uses onDelete: Restrict.
 
     for (let i = folderIds.length - 1; i >= 0; i--) {
       await tx.folder.delete({
@@ -702,7 +635,7 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
     if (totalSize > 0n) {
       await tx.user.update({
         where: {
-          id: userId,
+          id: ownerId,
         },
 
         data: {
@@ -716,14 +649,13 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
     return jobs;
   });
 
+  // Transaction has COMMITTED.
+  // Redis is external infrastructure,
+  // so invalidate only now.
+
+  await invalidateDashboardCache(ownerId);
+
   // ==================== PUBLISH DELETION JOBS ====================
-
-  /*
-    PostgreSQL transaction has committed.
-
-    Now ask RabbitMQ workers to physically
-    remove the objects from B2.
-  */
 
   let publishedJobs = 0;
 
@@ -733,14 +665,8 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
 
       publishedJobs++;
     } catch (error) {
-      /*
-        Not fatal.
-
-        Job remains PENDING in PostgreSQL.
-
-        storageDeletionRecovery.job.js
-        will republish it later.
-      */
+      // Job remains PENDING.
+      // Recovery worker can republish it later.
 
       console.error(`Failed to publish storage deletion job ${job.id}:`, error);
     }
@@ -748,13 +674,9 @@ export async function permanentlyDeleteFolder({ folderId, userId }) {
 
   return {
     deletedFolders: folderIds.length,
-
     deletedFiles: files.length,
-
     releasedStorage: Number(totalSize),
-
     deletionJobs: deletionJobs.length,
-
     publishedJobs,
   };
 }

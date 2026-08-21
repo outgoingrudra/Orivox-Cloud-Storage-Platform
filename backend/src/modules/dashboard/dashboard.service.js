@@ -1,6 +1,11 @@
 import prisma from "../../config/prisma.js";
 import { AppError } from "../../utils/AppError.js";
 
+import {
+  getCachedDashboard,
+  setDashboardCache,
+} from "./dashboard.cache.js";
+
 // ==================== FILE CATEGORY ====================
 
 function getFileCategory(mimeType) {
@@ -70,21 +75,18 @@ function buildActiveFolderSet(folders) {
 
     if (!folder) {
       memo.set(folderId, false);
-
       return false;
     }
 
     // Folder itself is trashed
     if (folder.isTrashed) {
       memo.set(folderId, false);
-
       return false;
     }
 
     // Root folder and not trashed
     if (!folder.parentId) {
       memo.set(folderId, true);
-
       return true;
     }
 
@@ -110,102 +112,119 @@ function buildActiveFolderSet(folders) {
 // ==================== DASHBOARD ====================
 
 export async function getDashboard(userId) {
-  const [user, folders, files] = await prisma.$transaction([
-    // ==================== USER ====================
+  // ==================== REDIS CACHE ====================
 
-    prisma.user.findUnique({
-      where: {
-        id: userId,
-      },
+  const cached =
+    await getCachedDashboard(userId);
 
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        isVerified: true,
+  if (cached) {
+    return cached;
+  }
 
-        storageUsed: true,
-        storageReserved: true,
-        storageLimit: true,
+  // ==================== DATABASE ====================
 
-        createdAt: true,
-      },
-    }),
+  const [user, folders, files] =
+    await prisma.$transaction([
+      // ==================== USER ====================
 
-    // ==================== ALL FOLDERS ====================
+      prisma.user.findUnique({
+        where: {
+          id: userId,
+        },
 
-    prisma.folder.findMany({
-      where: {
-        userId,
-      },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          isVerified: true,
+          storageUsed: true,
+          storageReserved: true,
+          storageLimit: true,
+          createdAt: true,
+        },
+      }),
 
-      select: {
-        id: true,
-        parentId: true,
-        isTrashed: true,
-      },
-    }),
+      // ==================== ALL FOLDERS ====================
 
-    // ==================== ALL FILES ====================
+      prisma.folder.findMany({
+        where: {
+          userId,
+        },
 
-    prisma.file.findMany({
-      where: {
-        userId,
-      },
+        select: {
+          id: true,
+          parentId: true,
+          isTrashed: true,
+        },
+      }),
 
-      select: {
-        id: true,
-        name: true,
-        mimeType: true,
-        size: true,
-        folderId: true,
-        isTrashed: true,
-        trashedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    }),
-  ]);
+      // ==================== ALL FILES ====================
+
+      prisma.file.findMany({
+        where: {
+          userId,
+        },
+
+        select: {
+          id: true,
+          name: true,
+          mimeType: true,
+          size: true,
+          folderId: true,
+          isTrashed: true,
+          trashedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
 
   if (!user) {
-    throw new AppError("User not found", 404);
+    throw new AppError(
+      "User not found",
+      404
+    );
   }
 
   // ==================== EFFECTIVE FOLDER STATE ====================
 
-  const activeFolderIds = buildActiveFolderSet(folders);
+  const activeFolderIds =
+    buildActiveFolderSet(folders);
 
   /*
-    Important:
+    A folder may itself have:
 
-    Folder may have:
     isTrashed = false
 
     but still be effectively hidden because
     one of its ancestors is trashed.
   */
 
-  const activeFolders = folders.filter((folder) =>
-    activeFolderIds.has(folder.id),
-  );
+  const activeFolders =
+    folders.filter((folder) =>
+      activeFolderIds.has(folder.id)
+    );
 
   // ==================== EFFECTIVE ACTIVE FILES ====================
 
-  const activeFiles = files.filter((file) => {
-    // File explicitly trashed
-    if (file.isTrashed) {
-      return false;
-    }
+  const activeFiles =
+    files.filter((file) => {
+      // File explicitly trashed
+      if (file.isTrashed) {
+        return false;
+      }
 
-    // Root-level active file
-    if (!file.folderId) {
-      return true;
-    }
+      // Root-level active file
+      if (!file.folderId) {
+        return true;
+      }
 
-    // File inside folder is active only if
-    // entire ancestor chain is active.
-    return activeFolderIds.has(file.folderId);
-  });
+      // File inside a folder is active only if
+      // its entire ancestor chain is active.
+      return activeFolderIds.has(
+        file.folderId
+      );
+    });
 
   // ==================== TRASH COUNTS ====================
 
@@ -216,11 +235,15 @@ export async function getDashboard(userId) {
     is trashed are not separate Trash entries.
   */
 
-  const trashedFileCount = files.filter((file) => file.isTrashed).length;
+  const trashedFileCount =
+    files.filter(
+      (file) => file.isTrashed
+    ).length;
 
-  const trashedFolderCount = folders.filter(
-    (folder) => folder.isTrashed,
-  ).length;
+  const trashedFolderCount =
+    folders.filter(
+      (folder) => folder.isTrashed
+    ).length;
 
   // ==================== STORAGE BREAKDOWN ====================
 
@@ -238,97 +261,129 @@ export async function getDashboard(userId) {
     including files in Trash.
 
     Trash still consumes physical storage,
-    so storage analytics should match storageUsed.
+    so storage analytics should match
+    storageUsed.
   */
 
   for (const file of files) {
-    const category = getFileCategory(file.mimeType);
+    const category =
+      getFileCategory(file.mimeType);
 
     breakdown[category] += file.size;
   }
 
   // ==================== RECENT FILES ====================
 
-  const recentFiles = [...activeFiles]
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .slice(0, 8);
+  const recentFiles =
+    [...activeFiles]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt) -
+          new Date(a.createdAt)
+      )
+      .slice(0, 8);
 
   // ==================== STORAGE ====================
 
-  const storageUsed = Number(user.storageUsed);
+  const storageUsed =
+    Number(user.storageUsed);
 
-  const storageReserved = Number(user.storageReserved);
+  const storageReserved =
+    Number(user.storageReserved);
 
-  const storageLimit = Number(user.storageLimit);
+  const storageLimit =
+    Number(user.storageLimit);
 
   const percentage =
     storageLimit === 0
       ? 0
-      : Number(((storageUsed / storageLimit) * 100).toFixed(2));
+      : Number(
+          (
+            (storageUsed /
+              storageLimit) *
+            100
+          ).toFixed(2)
+        );
 
   // ==================== RESPONSE ====================
 
-  return {
+  const dashboard = {
     user: {
       id: user.id,
-
       name: user.name,
-
       email: user.email,
-
       isVerified: user.isVerified,
-
       createdAt: user.createdAt,
     },
 
     storage: {
       used: storageUsed,
-
       reserved: storageReserved,
-
       limit: storageLimit,
 
-      available: Math.max(storageLimit - storageUsed - storageReserved, 0),
+      available: Math.max(
+        storageLimit -
+          storageUsed -
+          storageReserved,
+        0
+      ),
 
       percentage,
     },
 
     counts: {
       files: activeFiles.length,
-
       folders: activeFolders.length,
 
-      trashed: trashedFileCount + trashedFolderCount,
+      trashed:
+        trashedFileCount +
+        trashedFolderCount,
     },
 
     breakdown: {
-      images: Number(breakdown.images),
+      images: Number(
+        breakdown.images
+      ),
 
-      videos: Number(breakdown.videos),
+      videos: Number(
+        breakdown.videos
+      ),
 
-      audio: Number(breakdown.audio),
+      audio: Number(
+        breakdown.audio
+      ),
 
-      documents: Number(breakdown.documents),
+      documents: Number(
+        breakdown.documents
+      ),
 
-      archives: Number(breakdown.archives),
+      archives: Number(
+        breakdown.archives
+      ),
 
-      other: Number(breakdown.other),
+      other: Number(
+        breakdown.other
+      ),
     },
 
-    recentFiles: recentFiles.map((file) => ({
-      id: file.id,
-
-      name: file.name,
-
-      mimeType: file.mimeType,
-
-      size: Number(file.size),
-
-      folderId: file.folderId,
-
-      createdAt: file.createdAt,
-
-      updatedAt: file.updatedAt,
-    })),
+    recentFiles:
+      recentFiles.map((file) => ({
+        id: file.id,
+        name: file.name,
+        mimeType: file.mimeType,
+        size: Number(file.size),
+        folderId: file.folderId,
+        createdAt: file.createdAt,
+        updatedAt: file.updatedAt,
+      })),
   };
+
+  // ==================== CACHE RESULT ====================
+
+  await setDashboardCache(
+    userId,
+    dashboard
+  );
+
+  return dashboard;
 }

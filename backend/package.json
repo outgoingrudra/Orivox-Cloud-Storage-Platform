@@ -18,6 +18,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1110.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
+    "@upstash/redis": "^1.38.2",
     "amqplib": "^2.0.1",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",

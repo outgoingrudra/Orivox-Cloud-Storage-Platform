@@ -22,7 +22,7 @@ import {
 } from "../share/share.permission.js";
 import { publishStorageDeletion } from "./file.publisher.js";
 import { getValidRestoreParent } from "../folder/folder.helper.js";
-
+import { invalidateDashboardCache } from "../dashboard/dashboard.cache.js";
 import { AppError } from "../../utils/AppError.js";
 
 const UPLOAD_EXPIRY_MS = 15 * 60 * 1000;
@@ -48,14 +48,17 @@ export async function cleanupExpiredReservations(ownerId) {
     },
   });
 
+  let dashboardChanged = false;
+
   for (const reservation of expired) {
     const deletionJob = await prisma.$transaction(async (tx) => {
       /*
-          Atomically claim reservation.
+        Atomically claim reservation.
 
-          Only one process can change:
-          PENDING → EXPIRED
-        */
+        Only one process can change:
+        PENDING → EXPIRED
+      */
+
       const updated = await tx.uploadReservation.updateMany({
         where: {
           id: reservation.id,
@@ -86,11 +89,12 @@ export async function cleanupExpiredReservations(ownerId) {
       });
 
       /*
-          The object may or may not exist in B2.
+        The object may or may not exist in B2.
 
-          That's okay — deletion worker handles
-          deleting this object idempotently.
-        */
+        That's okay — deletion worker handles
+        deleting this object idempotently.
+      */
+
       const job = await tx.storageDeletionJob.create({
         data: {
           userId: reservation.ownerId,
@@ -116,6 +120,8 @@ export async function cleanupExpiredReservations(ownerId) {
       continue;
     }
 
+    dashboardChanged = true;
+
     try {
       publishStorageDeletion(deletionJob.id);
     } catch (error) {
@@ -125,11 +131,18 @@ export async function cleanupExpiredReservations(ownerId) {
         StorageDeletionJob remains PENDING
         and recovery job will republish it.
       */
+
       console.error(
         `Failed to publish expired-upload deletion job ${deletionJob.id}:`,
         error,
       );
     }
+  }
+
+  // storageReserved changed, so cached storage
+  // information is no longer valid.
+  if (dashboardChanged) {
+    await invalidateDashboardCache(ownerId);
   }
 }
 
@@ -188,36 +201,29 @@ export async function initiateUpload({
 
   const reservation = await prisma.$transaction(async (tx) => {
     /*
-        Atomically reserve storage ONLY if:
+      Atomically reserve storage ONLY if:
 
-        storageUsed
-        + storageReserved
-        + newFileSize
-        <= storageLimit
+      storageUsed
+      + storageReserved
+      + newFileSize
+      <= storageLimit
 
-        PostgreSQL handles concurrent UPDATEs
-        safely on the same user row.
-      */
+      PostgreSQL handles concurrent UPDATEs
+      safely on the same user row.
+    */
 
     const updatedRows = await tx.$executeRaw`
-        UPDATE "User"
-        SET "storageReserved" = "storageReserved" + ${fileSize}
-        WHERE "id" = ${ownerId}
-          AND (
-            "storageUsed"
-            + "storageReserved"
-            + ${fileSize}
-          ) <= "storageLimit"
-      `;
+      UPDATE "User"
+      SET "storageReserved" = "storageReserved" + ${fileSize}
+      WHERE "id" = ${ownerId}
+      AND (
+        "storageUsed"
+        + "storageReserved"
+        + ${fileSize}
+      ) <= "storageLimit"
+    `;
 
-    // Nothing was updated
     if (updatedRows !== 1) {
-      /*
-          Could mean:
-          1. user does not exist
-          2. storage quota would be exceeded
-        */
-
       const ownerExists = await tx.user.findUnique({
         where: {
           id: ownerId,
@@ -236,10 +242,10 @@ export async function initiateUpload({
     }
 
     /*
-        Because this is the SAME DB transaction,
-        if reservation creation fails,
-        the storageReserved increment also rolls back.
-      */
+      Because this is the SAME DB transaction,
+      if reservation creation fails,
+      storageReserved increment also rolls back.
+    */
 
     return tx.uploadReservation.create({
       data: {
@@ -265,6 +271,9 @@ export async function initiateUpload({
     });
   });
 
+  // storageReserved changed.
+  await invalidateDashboardCache(ownerId);
+
   // ==================== PRESIGNED B2 URL ====================
 
   const command = new PutObjectCommand({
@@ -279,11 +288,8 @@ export async function initiateUpload({
 
   return {
     reservationId: reservation.id,
-
     uploadUrl,
-
     objectKey: reservation.objectKey,
-
     expiresAt: reservation.expiresAt,
   };
 }
@@ -364,6 +370,10 @@ export async function cancelUpload({ userId, reservationId }) {
     };
   });
 
+  // Transaction committed.
+  // storageReserved has changed.
+  await invalidateDashboardCache(result.reservation.ownerId);
+
   // ==================== PUBLISH ====================
 
   try {
@@ -379,6 +389,7 @@ export async function cancelUpload({ userId, reservationId }) {
     reservationId,
   };
 }
+
 export async function confirmUpload({ userId, reservationId }) {
   const reservation = await prisma.uploadReservation.findFirst({
     where: {
@@ -461,7 +472,6 @@ export async function confirmUpload({ userId, reservationId }) {
       where: {
         id: reservationId,
 
-        // The caller must be the one who initiated it
         initiatedById: userId,
 
         status: "PENDING",
@@ -482,8 +492,7 @@ export async function confirmUpload({ userId, reservationId }) {
 
         size: latestReservation.size,
 
-        // IMPORTANT:
-        // file belongs to storage/folder owner
+        // File belongs to storage/folder owner.
         userId: latestReservation.ownerId,
 
         folderId: latestReservation.folderId,
@@ -499,7 +508,7 @@ export async function confirmUpload({ userId, reservationId }) {
       },
     });
 
-    // Quota also belongs to owner
+    // Quota belongs to owner.
     await tx.user.update({
       where: {
         id: latestReservation.ownerId,
@@ -529,11 +538,17 @@ export async function confirmUpload({ userId, reservationId }) {
     return createdFile;
   });
 
+  // Important:
+  // reservation.ownerId is the actual
+  // storage owner, not necessarily userId.
+  await invalidateDashboardCache(reservation.ownerId);
+
   return {
     ...file,
     size: Number(file.size),
   };
 }
+
 export async function listFiles({
   userId,
   folderId,
@@ -651,6 +666,7 @@ export async function listFiles({
     },
   };
 }
+
 export async function renameFile({ fileId, userId, name }) {
   await requireFilePermission({
     fileId,
@@ -669,6 +685,10 @@ export async function renameFile({ fileId, userId, name }) {
 
     select: {
       id: true,
+
+      // Needed for cache invalidation
+      userId: true,
+
       name: true,
       mimeType: true,
       size: true,
@@ -677,6 +697,8 @@ export async function renameFile({ fileId, userId, name }) {
     },
   });
 
+  await invalidateDashboardCache(file.userId);
+
   return {
     ...file,
     size: Number(file.size),
@@ -684,7 +706,7 @@ export async function renameFile({ fileId, userId, name }) {
 }
 
 export async function moveFile({ fileId, userId, folderId }) {
-  const permission = await requireFilePermission({
+  await requireFilePermission({
     fileId,
     userId,
     minimum: PERMISSION.EDITOR,
@@ -710,12 +732,13 @@ export async function moveFile({ fileId, userId, folderId }) {
 
   if (!folderId) {
     /*
-      Only the actual owner can move a file
+      Only actual owner can move a file
       to their root directory.
 
       A shared EDITOR cannot take someone
-      else's file out of the owner's folder tree.
+      else's file out of the owner's tree.
     */
+
     if (existingFile.userId !== userId) {
       throw new AppError("Shared files cannot be moved to your root", 403);
     }
@@ -724,7 +747,7 @@ export async function moveFile({ fileId, userId, folderId }) {
   // ==================== MOVE INTO FOLDER ====================
 
   if (folderId) {
-    const destinationPermission = await requireFolderPermission({
+    await requireFolderPermission({
       folderId,
       userId,
       minimum: PERMISSION.EDITOR,
@@ -746,18 +769,10 @@ export async function moveFile({ fileId, userId, folderId }) {
     }
 
     /*
-      Prevent moving somebody else's shared file
-      into a folder owned by a completely different user.
-
-      Example:
-
-      John owns file A
-      Rudra has EDITOR access to file A
-      Rudra owns folder B
-
-      Rudra should NOT move John's file into
-      Rudra's own folder B.
+      File and destination must belong
+      to the same storage owner.
     */
+
     if (existingFile.userId !== destination.userId) {
       throw new AppError(
         "File and destination folder must belong to the same owner",
@@ -785,11 +800,14 @@ export async function moveFile({ fileId, userId, folderId }) {
     },
   });
 
+  await invalidateDashboardCache(existingFile.userId);
+
   return {
     ...file,
     size: Number(file.size),
   };
 }
+
 export async function getFileDownloadUrl({ fileId, userId }) {
   await requireFilePermission({
     fileId,
@@ -846,6 +864,7 @@ export async function trashFile({ fileId, userId }) {
       trashedAt: true,
     },
   });
+  await invalidateDashboardCache(userId);
 
   return file;
 }
@@ -900,6 +919,7 @@ export async function restoreFile({ fileId, userId }) {
       isTrashed: true,
     },
   });
+  await invalidateDashboardCache(userId);
 
   return {
     ...restored,
@@ -909,6 +929,7 @@ export async function restoreFile({ fileId, userId }) {
 
 export async function permanentlyDeleteFile({ fileId, userId }) {
   // ==================== OWNER PERMISSION ====================
+
   await requireFilePermission({
     fileId,
     userId,
@@ -943,11 +964,12 @@ export async function permanentlyDeleteFile({ fileId, userId }) {
 
   const deletionJob = await prisma.$transaction(async (tx) => {
     /*
-          Create deletion job FIRST.
+        Create deletion job FIRST.
 
-          This becomes our durable record saying:
-          "this B2 object must eventually be deleted."
-        */
+        Durable record saying:
+        "this B2 object must eventually
+        be deleted."
+      */
 
     const job = await tx.storageDeletionJob.create({
       data: {
@@ -967,12 +989,7 @@ export async function permanentlyDeleteFile({ fileId, userId }) {
       },
     });
 
-    /*
-          Remove logical file metadata.
-
-          User should no longer see/access
-          this file after permanent deletion.
-        */
+    // Remove logical file metadata.
 
     await tx.file.delete({
       where: {
@@ -981,12 +998,11 @@ export async function permanentlyDeleteFile({ fileId, userId }) {
     });
 
     /*
-          Release user's actual used storage.
+        Release used storage.
 
-          The logical file is now deleted from
-          Orivox even though physical B2 cleanup
-          may happen milliseconds later.
-        */
+        Physical object cleanup can happen
+        asynchronously afterward.
+      */
 
     await tx.user.update({
       where: {
@@ -1003,29 +1019,22 @@ export async function permanentlyDeleteFile({ fileId, userId }) {
     return job;
   });
 
+  // PostgreSQL transaction has committed.
+  // Redis is external infrastructure.
+  await invalidateDashboardCache(file.userId);
+
   // ==================== PUBLISH DELETION JOB ====================
-
-  /*
-    IMPORTANT:
-    Publish AFTER DB transaction.
-
-    RabbitMQ is not part of the PostgreSQL
-    transaction, so we don't pretend both
-    systems are atomic.
-  */
 
   try {
     publishStorageDeletion(deletionJob.id);
   } catch (error) {
     /*
-      Don't undo the delete.
+      Don't undo logical deletion.
 
-      StorageDeletionJob is still PENDING
-      in PostgreSQL.
-
-      Our recovery job will later find
-      and republish it.
+      StorageDeletionJob remains PENDING
+      and recovery can republish it.
     */
+
     console.error(
       `Failed to publish storage deletion job ${deletionJob.id}:`,
       error,
@@ -1038,7 +1047,6 @@ export async function permanentlyDeleteFile({ fileId, userId }) {
     message: "File scheduled for permanent deletion",
   };
 }
-
 // ==================== GLOBAL EXPIRED RESERVATION CLEANUP ====================
 export async function cleanupAllExpiredReservations() {
   const expiredReservations = await prisma.uploadReservation.findMany({
@@ -1061,6 +1069,10 @@ export async function cleanupAllExpiredReservations() {
   });
 
   let cleaned = 0;
+
+  // Avoid invalidating the same user's cache
+  // repeatedly if they have multiple expired uploads.
+  const affectedOwnerIds = new Set();
 
   for (const reservation of expiredReservations) {
     const deletionJob = await prisma.$transaction(async (tx) => {
@@ -1122,6 +1134,8 @@ export async function cleanupAllExpiredReservations() {
 
     cleaned++;
 
+    affectedOwnerIds.add(reservation.ownerId);
+
     // ==================== PUBLISH ====================
 
     try {
@@ -1134,15 +1148,16 @@ export async function cleanupAllExpiredReservations() {
     }
   }
 
+  // Invalidate once per affected owner,
+  // not once per expired reservation.
+  await Promise.all(
+    [...affectedOwnerIds].map((ownerId) => invalidateDashboardCache(ownerId)),
+  );
+
   return cleaned;
 }
 
-
-export async function listTrashedFiles({
-  userId,
-  page,
-  limit,
-}) {
+export async function listTrashedFiles({ userId, page, limit }) {
   const skip = (page - 1) * limit;
 
   const where = {
@@ -1150,33 +1165,32 @@ export async function listTrashedFiles({
     isTrashed: true,
   };
 
-  const [files, total] =
-    await prisma.$transaction([
-      prisma.file.findMany({
-        where,
+  const [files, total] = await prisma.$transaction([
+    prisma.file.findMany({
+      where,
 
-        skip,
-        take: limit,
+      skip,
+      take: limit,
 
-        orderBy: {
-          trashedAt: "desc",
-        },
+      orderBy: {
+        trashedAt: "desc",
+      },
 
-        select: {
-          id: true,
-          name: true,
-          mimeType: true,
-          size: true,
-          folderId: true,
-          trashedAt: true,
-          createdAt: true,
-        },
-      }),
+      select: {
+        id: true,
+        name: true,
+        mimeType: true,
+        size: true,
+        folderId: true,
+        trashedAt: true,
+        createdAt: true,
+      },
+    }),
 
-      prisma.file.count({
-        where,
-      }),
-    ]);
+    prisma.file.count({
+      where,
+    }),
+  ]);
 
   return {
     files: files.map((file) => ({
@@ -1188,14 +1202,11 @@ export async function listTrashedFiles({
       page,
       limit,
       total,
-      totalPages:
-        Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit),
 
-      hasNextPage:
-        page * limit < total,
+      hasNextPage: page * limit < total,
 
-      hasPreviousPage:
-        page > 1,
+      hasPreviousPage: page > 1,
     },
   };
 }
