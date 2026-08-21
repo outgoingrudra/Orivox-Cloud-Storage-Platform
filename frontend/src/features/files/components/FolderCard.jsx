@@ -1,6 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   FilePenLine,
@@ -28,7 +32,12 @@ export default function FolderCard({
   folder,
   index,
   onOpen,
+  permission,
+   sharedRootId,
 }) {
+  const menuRef =
+    useRef(null);
+
   const [menuOpen, setMenuOpen] =
     useState(false);
 
@@ -47,8 +56,22 @@ export default function FolderCard({
   const trashMutation =
     useTrashFolder();
 
+  // ==================== PERMISSIONS ====================
+
+  /*
+    No permission prop means this is
+    the user's normal owned explorer.
+  */
+  const isOwner =
+    !permission ||
+    permission === "OWNER";
+
+  const canEdit =
+    isOwner ||
+    permission === "EDITOR";
+
   const folderCount =
-    folder._count?.folders ??
+    folder._count?.children ??
     folder.folderCount ??
     0;
 
@@ -57,8 +80,66 @@ export default function FolderCard({
     folder.fileCount ??
     0;
 
+  // ==================== OUTSIDE CLICK ====================
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleOutsideClick(
+      event
+    ) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(
+          event.target
+        )
+      ) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEscape(
+      event
+    ) {
+      if (
+        event.key === "Escape"
+      ) {
+        setMenuOpen(false);
+      }
+    }
+
+    document.addEventListener(
+      "pointerdown",
+      handleOutsideClick
+    );
+
+    document.addEventListener(
+      "keydown",
+      handleEscape
+    );
+
+    return () => {
+      document.removeEventListener(
+        "pointerdown",
+        handleOutsideClick
+      );
+
+      document.removeEventListener(
+        "keydown",
+        handleEscape
+      );
+    };
+  }, [menuOpen]);
+
+  // ==================== TRASH ====================
+
   async function handleTrash() {
-    if (trashMutation.isPending) return;
+    if (
+      !isOwner ||
+      trashMutation.isPending
+    ) {
+      return;
+    }
 
     const confirmed =
       window.confirm(
@@ -83,17 +164,25 @@ export default function FolderCard({
     }
   }
 
+  // ==================== ACTIONS ====================
+
   function handleRename() {
+    if (!canEdit) return;
+
     setMenuOpen(false);
     setRenameOpen(true);
   }
 
   function handleMove() {
+    if (!canEdit) return;
+
     setMenuOpen(false);
     setMoveOpen(true);
   }
 
   function handleShare() {
+    if (!isOwner) return;
+
     setMenuOpen(false);
     setShareOpen(true);
   }
@@ -122,6 +211,8 @@ export default function FolderCard({
         className="group relative cursor-pointer rounded-2xl border border-base-300 bg-base-100 p-4 shadow-sm transition"
       >
         <div className="flex items-start justify-between">
+          {/* ==================== FOLDER ICON ==================== */}
+
           <motion.button
             type="button"
             whileHover={{
@@ -131,9 +222,11 @@ export default function FolderCard({
             whileTap={{
               scale: 0.95,
             }}
-            onClick={() =>
-              onOpen(folder.id)
-            }
+            onClick={(event) => {
+              event.stopPropagation();
+
+              onOpen(folder.id);
+            }}
             className="flex h-11 w-11 items-center justify-center rounded-xl bg-base-200"
             aria-label={`Open ${folder.name}`}
           >
@@ -142,41 +235,41 @@ export default function FolderCard({
 
           {/* ==================== ACTION MENU ==================== */}
 
-          <div className="relative">
-            <motion.button
-              type="button"
-              whileHover={{
-                scale: 1.08,
-              }}
-              whileTap={{
-                scale: 0.9,
-              }}
-              onClick={(event) => {
-                event.stopPropagation();
-
-                setMenuOpen(
-                  (value) => !value
-                );
-              }}
-              className="btn btn-ghost btn-circle btn-sm opacity-50 transition group-hover:opacity-100"
-              aria-label={`Actions for ${folder.name}`}
+          {canEdit && (
+            <div
+              ref={menuRef}
+              className="relative"
+              onClick={(event) =>
+                event.stopPropagation()
+              }
+              onDoubleClick={(event) =>
+                event.stopPropagation()
+              }
             >
-              <MoreVertical size={17} />
-            </motion.button>
+              <motion.button
+                type="button"
+                whileHover={{
+                  scale: 1.08,
+                }}
+                whileTap={{
+                  scale: 0.9,
+                }}
+                onClick={() =>
+                  setMenuOpen(
+                    (value) =>
+                      !value
+                  )
+                }
+                className="btn btn-ghost btn-circle btn-sm opacity-50 transition group-hover:opacity-100"
+                aria-label={`Actions for ${folder.name}`}
+              >
+                <MoreVertical
+                  size={17}
+                />
+              </motion.button>
 
-            <AnimatePresence>
-              {menuOpen && (
-                <>
-                  <button
-                    type="button"
-                    aria-label="Close folder actions"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setMenuOpen(false);
-                    }}
-                    className="fixed inset-0 z-40 cursor-default"
-                  />
-
+              <AnimatePresence>
+                {menuOpen && (
                   <motion.div
                     initial={{
                       opacity: 0,
@@ -196,109 +289,136 @@ export default function FolderCard({
                     transition={{
                       duration: 0.16,
                     }}
-                    onClick={(event) =>
-                      event.stopPropagation()
-                    }
                     className="absolute right-0 top-10 z-50 w-44 rounded-xl border border-base-300 bg-base-100 p-1.5 shadow-xl"
                   >
-                    {/* SHARE */}
+                    {/* SHARE — OWNER ONLY */}
 
-                    <motion.button
-                      type="button"
-                      whileHover={{ x: 3 }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleShare
-                      }
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
-                    >
-                      <Share2 size={16} />
-                      Share
-                    </motion.button>
-
-                    {/* RENAME */}
-
-                    <motion.button
-                      type="button"
-                      whileHover={{ x: 3 }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleRename
-                      }
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
-                    >
-                      <FilePenLine
-                        size={16}
-                      />
-                      Rename
-                    </motion.button>
-
-                    {/* MOVE */}
-
-                    <motion.button
-                      type="button"
-                      whileHover={{ x: 3 }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleMove
-                      }
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
-                    >
-                      <MoveRight size={16} />
-                      Move
-                    </motion.button>
-
-                    <div className="my-1 border-t border-base-300" />
-
-                    {/* TRASH */}
-
-                    <motion.button
-                      type="button"
-                      whileHover={{ x: 3 }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleTrash
-                      }
-                      disabled={
-                        trashMutation.isPending
-                      }
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-error transition hover:bg-error/10"
-                    >
-                      {trashMutation.isPending ? (
-                        <LoaderCircle
+                    {isOwner && (
+                      <motion.button
+                        type="button"
+                        whileHover={{
+                          x: 3,
+                        }}
+                        whileTap={{
+                          scale: 0.97,
+                        }}
+                        onClick={
+                          handleShare
+                        }
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
+                      >
+                        <Share2
                           size={16}
-                          className="animate-spin"
                         />
-                      ) : (
-                        <Trash2 size={16} />
-                      )}
+                        Share
+                      </motion.button>
+                    )}
 
-                      {trashMutation.isPending
-                        ? "Moving..."
-                        : "Move to trash"}
-                    </motion.button>
+                    {/* RENAME — OWNER / EDITOR */}
+
+                    {canEdit && (
+                      <motion.button
+                        type="button"
+                        whileHover={{
+                          x: 3,
+                        }}
+                        whileTap={{
+                          scale: 0.97,
+                        }}
+                        onClick={
+                          handleRename
+                        }
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
+                      >
+                        <FilePenLine
+                          size={16}
+                        />
+                        Rename
+                      </motion.button>
+                    )}
+
+                    {/* MOVE — OWNER / EDITOR */}
+
+                    {canEdit && (
+                      <motion.button
+                        type="button"
+                        whileHover={{
+                          x: 3,
+                        }}
+                        whileTap={{
+                          scale: 0.97,
+                        }}
+                        onClick={
+                          handleMove
+                        }
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
+                      >
+                        <MoveRight
+                          size={16}
+                        />
+                        Move
+                      </motion.button>
+                    )}
+
+                    {/* TRASH — OWNER ONLY */}
+
+                    {isOwner && (
+                      <>
+                        <div className="my-1 border-t border-base-300" />
+
+                        <motion.button
+                          type="button"
+                          whileHover={{
+                            x: 3,
+                          }}
+                          whileTap={{
+                            scale: 0.97,
+                          }}
+                          onClick={
+                            handleTrash
+                          }
+                          disabled={
+                            trashMutation.isPending
+                          }
+                          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-error transition hover:bg-error/10"
+                        >
+                          {trashMutation.isPending ? (
+                            <LoaderCircle
+                              size={
+                                16
+                              }
+                              className="animate-spin"
+                            />
+                          ) : (
+                            <Trash2
+                              size={
+                                16
+                              }
+                            />
+                          )}
+
+                          {trashMutation.isPending
+                            ? "Moving..."
+                            : "Move to trash"}
+                        </motion.button>
+                      </>
+                    )}
                   </motion.div>
-                </>
-              )}
-            </AnimatePresence>
-          </div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
         </div>
 
         {/* ==================== FOLDER INFO ==================== */}
 
         <button
           type="button"
-          onClick={() =>
-            onOpen(folder.id)
-          }
+          onClick={(event) => {
+            event.stopPropagation();
+
+            onOpen(folder.id);
+          }}
           className="mt-5 block w-full truncate text-left font-semibold hover:underline"
         >
           {folder.name}
@@ -328,36 +448,44 @@ export default function FolderCard({
 
       {/* ==================== RENAME MODAL ==================== */}
 
-      <RenameModal
-        open={renameOpen}
-        onClose={() =>
-          setRenameOpen(false)
-        }
-        item={folder}
-        type="folder"
-      />
+      {canEdit && (
+        <RenameModal
+          open={renameOpen}
+          onClose={() =>
+            setRenameOpen(false)
+          }
+          item={folder}
+          type="folder"
+        />
+      )}
 
       {/* ==================== MOVE MODAL ==================== */}
 
-      <MoveModal
-        open={moveOpen}
-        onClose={() =>
-          setMoveOpen(false)
-        }
-        item={folder}
-        type="folder"
-      />
+      {canEdit && (
+        <MoveModal
+          open={moveOpen}
+          onClose={() =>
+            setMoveOpen(false)
+          }
+          item={folder}
+          type="folder"
+           permission={permission}
+           sharedRootId={sharedRootId}
+        />
+      )}
 
       {/* ==================== SHARE MODAL ==================== */}
 
-      <ShareModal
-        open={shareOpen}
-        onClose={() =>
-          setShareOpen(false)
-        }
-        item={folder}
-        type="folder"
-      />
+      {isOwner && (
+        <ShareModal
+          open={shareOpen}
+          onClose={() =>
+            setShareOpen(false)
+          }
+          item={folder}
+          type="folder"
+        />
+      )}
     </>
   );
 }

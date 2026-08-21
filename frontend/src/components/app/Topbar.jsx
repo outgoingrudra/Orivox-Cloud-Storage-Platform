@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 
@@ -11,7 +11,6 @@ import {
   Menu,
   Search,
   Settings,
-  Upload,
   UserRound,
 } from "lucide-react";
 
@@ -22,21 +21,65 @@ import { api } from "@/lib/api";
 import { clearAccessToken } from "@/lib/token";
 import { setUnauthenticated } from "@/store/authSlice";
 
-export default function Topbar({
-  onMenuClick,
-}) {
+export default function Topbar({ onMenuClick }) {
   const router = useRouter();
   const dispatch = useDispatch();
 
-  const user = useSelector(
-    (state) => state.auth.user
-  );
+  const user = useSelector((state) => state.auth.user);
 
-  const [userMenuOpen, setUserMenuOpen] =
-    useState(false);
+  const userMenuRef = useRef(null);
 
-  const [loggingOut, setLoggingOut] =
-    useState(false);
+  const [search, setSearch] = useState("");
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  // =====================================================
+  // USER MENU — OUTSIDE CLICK + ESCAPE
+  // =====================================================
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    function handleOutsideClick(event) {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(event.target)
+      ) {
+        setUserMenuOpen(false);
+      }
+    }
+
+    function handleEscape(event) {
+      if (event.key === "Escape") {
+        setUserMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", handleOutsideClick);
+    document.addEventListener("keydown", handleEscape);
+
+    return () => {
+      document.removeEventListener("pointerdown", handleOutsideClick);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [userMenuOpen]);
+
+  // =====================================================
+  // SEARCH
+  // =====================================================
+
+  function handleSearch(event) {
+    event.preventDefault();
+
+    const query = search.trim();
+    if (!query) return;
+
+    router.push(`/search?q=${encodeURIComponent(query)}`);
+  }
+
+  // =====================================================
+  // LOGOUT
+  // =====================================================
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -44,20 +87,13 @@ export default function Topbar({
     try {
       setLoggingOut(true);
 
-      await api.post(
-        "/auth/logout"
-      );
+      await api.post("/auth/logout");
     } catch (error) {
-      console.error(
-        "Logout failed:",
-        error
-      );
+      console.error("Logout failed:", error);
     } finally {
       clearAccessToken();
 
-      dispatch(
-        setUnauthenticated()
-      );
+      dispatch(setUnauthenticated());
 
       router.replace("/login");
     }
@@ -89,12 +125,7 @@ export default function Topbar({
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.92 }}
         onClick={onMenuClick}
-        className="
-          btn
-          btn-ghost
-          btn-circle
-          lg:hidden
-        "
+        className="btn btn-ghost btn-circle lg:hidden"
         aria-label="Open sidebar"
       >
         <Menu size={21} />
@@ -102,31 +133,22 @@ export default function Topbar({
 
       {/* ==================== SEARCH ==================== */}
 
-      <motion.div
+      <motion.form
+        onSubmit={handleSearch}
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="
-          relative
-          hidden
-          max-w-xl
-          flex-1
-          md:block
-        "
+        className="relative hidden max-w-xl flex-1 md:block"
       >
         <Search
           size={18}
-          className="
-            absolute
-            left-4
-            top-1/2
-            -translate-y-1/2
-            opacity-40
-          "
+          className="absolute left-4 top-1/2 -translate-y-1/2 opacity-40"
         />
 
         <input
           type="text"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
           placeholder="Search files and folders..."
           className="
             input
@@ -144,7 +166,8 @@ export default function Topbar({
           "
         />
 
-        <div
+        <button
+          type="submit"
           className="
             absolute
             right-3
@@ -158,31 +181,28 @@ export default function Topbar({
             text-[10px]
             font-semibold
             opacity-40
+            transition
+            hover:opacity-80
           "
         >
-          ⌘ K
-        </div>
-      </motion.div>
+          Enter
+        </button>
+      </motion.form>
 
-      {/* Mobile search */}
+      {/* ==================== MOBILE SEARCH ==================== */}
 
       <motion.button
         type="button"
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.92 }}
-        className="
-          btn
-          btn-ghost
-          btn-circle
-          md:hidden
-        "
+        onClick={() => router.push("/search")}
+        className="btn btn-ghost btn-circle md:hidden"
         aria-label="Search"
       >
         <Search size={19} />
       </motion.button>
 
       <div className="ml-auto flex items-center gap-1 sm:gap-2">
-       
         {/* ==================== THEME ==================== */}
 
         <ThemeSwitcher />
@@ -191,18 +211,9 @@ export default function Topbar({
 
         <motion.button
           type="button"
-          whileHover={{
-            scale: 1.06,
-          }}
-          whileTap={{
-            scale: 0.92,
-          }}
-          className="
-            btn
-            btn-ghost
-            btn-circle
-            relative
-          "
+          whileHover={{ scale: 1.06 }}
+          whileTap={{ scale: 0.92 }}
+          className="btn btn-ghost btn-circle relative"
           aria-label="Notifications"
         >
           <Bell size={19} />
@@ -222,19 +233,13 @@ export default function Topbar({
 
         {/* ==================== USER MENU ==================== */}
 
-        <div className="relative">
+        <div ref={userMenuRef} className="relative">
           <motion.button
             type="button"
-            whileHover={{
-              scale: 1.02,
-            }}
-            whileTap={{
-              scale: 0.97,
-            }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
             onClick={() =>
-              setUserMenuOpen(
-                (value) => !value
-              )
+              setUserMenuOpen((value) => !value)
             }
             className="
               flex
@@ -260,203 +265,137 @@ export default function Topbar({
                 text-base-100
               "
             >
-              {user?.name
-                ?.charAt(0)
-                ?.toUpperCase() ||
-                "U"}
+              {user?.name?.charAt(0)?.toUpperCase() || "U"}
             </div>
 
             <div className="hidden text-left xl:block">
               <p className="max-w-32 truncate text-sm font-semibold">
-                {user?.name ||
-                  "Orivox User"}
+                {user?.name || "Orivox User"}
               </p>
 
               <p className="max-w-32 truncate text-[11px] opacity-45">
-                {user?.email ||
-                  "user@orivox.com"}
+                {user?.email || "user@orivox.com"}
               </p>
             </div>
 
             <motion.span
               animate={{
-                rotate:
-                  userMenuOpen
-                    ? 180
-                    : 0,
+                rotate: userMenuOpen ? 180 : 0,
               }}
-              transition={{
-                duration: 0.2,
-              }}
+              transition={{ duration: 0.2 }}
               className="hidden xl:block"
             >
-              <ChevronDown
-                size={15}
-              />
+              <ChevronDown size={15} />
             </motion.span>
           </motion.button>
 
           <AnimatePresence>
             {userMenuOpen && (
-              <>
-                {/* Invisible backdrop */}
+              <motion.div
+                initial={{
+                  opacity: 0,
+                  y: -8,
+                  scale: 0.96,
+                }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                  scale: 1,
+                }}
+                exit={{
+                  opacity: 0,
+                  y: -6,
+                  scale: 0.97,
+                }}
+                transition={{
+                  duration: 0.18,
+                }}
+                className="
+                  absolute
+                  right-0
+                  top-[calc(100%+0.65rem)]
+                  z-50
+                  w-60
+                  overflow-hidden
+                  rounded-2xl
+                  border
+                  border-base-300
+                  bg-base-100
+                  p-2
+                  shadow-2xl
+                "
+              >
+                {/* ==================== USER SUMMARY ==================== */}
 
-                <button
-                  type="button"
-                  aria-label="Close user menu"
-                  onClick={() =>
-                    setUserMenuOpen(
-                      false
-                    )
-                  }
-                  className="
-                    fixed
-                    inset-0
-                    z-40
-                    cursor-default
-                  "
-                />
+                <div className="border-b border-base-300 px-3 pb-3 pt-2">
+                  <p className="truncate text-sm font-semibold">
+                    {user?.name || "Orivox User"}
+                  </p>
 
-                <motion.div
-                  initial={{
-                    opacity: 0,
-                    y: -8,
-                    scale: 0.96,
-                  }}
-                  animate={{
-                    opacity: 1,
-                    y: 0,
-                    scale: 1,
-                  }}
-                  exit={{
-                    opacity: 0,
-                    y: -6,
-                    scale: 0.97,
-                  }}
-                  transition={{
-                    duration: 0.18,
-                  }}
-                  className="
-                    absolute
-                    right-0
-                    top-[calc(100%+0.65rem)]
-                    z-50
-                    w-60
-                    overflow-hidden
-                    rounded-2xl
-                    border
-                    border-base-300
-                    bg-base-100
-                    p-2
-                    shadow-2xl
-                  "
-                >
-                  {/* user summary */}
+                  <p className="mt-0.5 truncate text-xs opacity-45">
+                    {user?.email || "user@orivox.com"}
+                  </p>
+                </div>
 
-                  <div
+                {/* ==================== MENU ==================== */}
+
+                <div className="py-2">
+                  <MenuButton
+                    icon={UserRound}
+                    label="Profile"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      router.push("/settings");
+                    }}
+                  />
+
+                  <MenuButton
+                    icon={Settings}
+                    label="Settings"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      router.push("/settings");
+                    }}
+                  />
+                </div>
+
+                {/* ==================== LOGOUT ==================== */}
+
+                <div className="border-t border-base-300 pt-2">
+                  <motion.button
+                    type="button"
+                    whileHover={{ x: 3 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleLogout}
+                    disabled={loggingOut}
                     className="
-                      border-b
-                      border-base-300
+                      flex
+                      w-full
+                      items-center
+                      gap-3
+                      rounded-xl
                       px-3
-                      pb-3
-                      pt-2
+                      py-2.5
+                      text-left
+                      text-sm
+                      font-semibold
+                      text-error
+                      transition
+                      hover:bg-error/10
                     "
                   >
-                    <p className="truncate text-sm font-semibold">
-                      {user?.name ||
-                        "Orivox User"}
-                    </p>
+                    {loggingOut ? (
+                      <span className="loading loading-spinner loading-xs" />
+                    ) : (
+                      <LogOut size={17} />
+                    )}
 
-                    <p className="mt-0.5 truncate text-xs opacity-45">
-                      {user?.email ||
-                        "user@orivox.com"}
-                    </p>
-                  </div>
-
-                  {/* menu */}
-
-                  <div className="py-2">
-                    <MenuButton
-                      icon={UserRound}
-                      label="Profile"
-                      onClick={() => {
-                        setUserMenuOpen(
-                          false
-                        );
-
-                        router.push(
-                          "/settings"
-                        );
-                      }}
-                    />
-
-                    <MenuButton
-                      icon={Settings}
-                      label="Settings"
-                      onClick={() => {
-                        setUserMenuOpen(
-                          false
-                        );
-
-                        router.push(
-                          "/settings"
-                        );
-                      }}
-                    />
-                  </div>
-
-                  <div
-                    className="
-                      border-t
-                      border-base-300
-                      pt-2
-                    "
-                  >
-                    <motion.button
-                      type="button"
-                      whileHover={{
-                        x: 3,
-                      }}
-                      whileTap={{
-                        scale: 0.98,
-                      }}
-                      onClick={
-                        handleLogout
-                      }
-                      disabled={
-                        loggingOut
-                      }
-                      className="
-                        flex
-                        w-full
-                        items-center
-                        gap-3
-                        rounded-xl
-                        px-3
-                        py-2.5
-                        text-left
-                        text-sm
-                        font-semibold
-                        text-error
-                        transition
-                        hover:bg-error/10
-                      "
-                    >
-                      {loggingOut ? (
-                        <span className="loading loading-spinner loading-xs" />
-                      ) : (
-                        <LogOut
-                          size={17}
-                        />
-                      )}
-
-                      {loggingOut
-                        ? "Logging out..."
-                        : "Logout"}
-                    </motion.button>
-                  </div>
-                </motion.div>
-              </>
+                    {loggingOut
+                      ? "Logging out..."
+                      : "Logout"}
+                  </motion.button>
+                </div>
+              </motion.div>
             )}
           </AnimatePresence>
         </div>
@@ -473,12 +412,8 @@ function MenuButton({
   return (
     <motion.button
       type="button"
-      whileHover={{
-        x: 3,
-      }}
-      whileTap={{
-        scale: 0.98,
-      }}
+      whileHover={{ x: 3 }}
+      whileTap={{ scale: 0.98 }}
       onClick={onClick}
       className="
         flex

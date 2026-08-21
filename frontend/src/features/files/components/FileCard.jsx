@@ -1,6 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 import {
   Download,
@@ -33,7 +37,12 @@ import {
 export default function FileCard({
   file,
   index,
+  permission,
+  sharedRootId
 }) {
+  const menuRef =
+    useRef(null);
+
   const Icon =
     getFileIcon(file.mimeType);
 
@@ -58,8 +67,75 @@ export default function FileCard({
   const trashMutation =
     useTrashFile();
 
+  // ==================== PERMISSIONS ====================
+
+  const isOwner =
+    !permission ||
+    permission === "OWNER";
+
+  const canEdit =
+    isOwner ||
+    permission === "EDITOR";
+
+  // ==================== OUTSIDE CLICK ====================
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleOutsideClick(
+      event
+    ) {
+      if (
+        menuRef.current &&
+        !menuRef.current.contains(
+          event.target
+        )
+      ) {
+        setMenuOpen(false);
+      }
+    }
+
+    function handleEscape(
+      event
+    ) {
+      if (
+        event.key === "Escape"
+      ) {
+        setMenuOpen(false);
+      }
+    }
+
+    document.addEventListener(
+      "pointerdown",
+      handleOutsideClick
+    );
+
+    document.addEventListener(
+      "keydown",
+      handleEscape
+    );
+
+    return () => {
+      document.removeEventListener(
+        "pointerdown",
+        handleOutsideClick
+      );
+
+      document.removeEventListener(
+        "keydown",
+        handleEscape
+      );
+    };
+  }, [menuOpen]);
+
+  // ==================== DOWNLOAD ====================
+
   async function handleDownload() {
-    if (downloadMutation.isPending) return;
+    if (
+      downloadMutation.isPending
+    ) {
+      return;
+    }
 
     setError("");
 
@@ -96,8 +172,15 @@ export default function FileCard({
     }
   }
 
+  // ==================== TRASH ====================
+
   async function handleTrash() {
-    if (trashMutation.isPending) return;
+    if (
+      !isOwner ||
+      trashMutation.isPending
+    ) {
+      return;
+    }
 
     const confirmed =
       window.confirm(
@@ -122,17 +205,25 @@ export default function FileCard({
     }
   }
 
+  // ==================== ACTIONS ====================
+
   function handleRename() {
+    if (!canEdit) return;
+
     setMenuOpen(false);
     setRenameOpen(true);
   }
 
   function handleMove() {
+    if (!canEdit) return;
+
     setMenuOpen(false);
     setMoveOpen(true);
   }
 
   function handleShare() {
+    if (!isOwner) return;
+
     setMenuOpen(false);
     setShareOpen(true);
   }
@@ -170,7 +261,10 @@ export default function FileCard({
 
           {/* ==================== ACTION MENU ==================== */}
 
-          <div className="relative">
+          <div
+            ref={menuRef}
+            className="relative"
+          >
             <motion.button
               type="button"
               whileHover={{
@@ -181,83 +275,83 @@ export default function FileCard({
               }}
               onClick={() =>
                 setMenuOpen(
-                  (value) => !value
+                  (value) =>
+                    !value
                 )
               }
               className="btn btn-ghost btn-circle btn-sm opacity-50 transition group-hover:opacity-100"
               aria-label={`Actions for ${file.name}`}
             >
-              <MoreVertical size={17} />
+              <MoreVertical
+                size={17}
+              />
             </motion.button>
 
             <AnimatePresence>
               {menuOpen && (
-                <>
-                  <button
+                <motion.div
+                  initial={{
+                    opacity: 0,
+                    y: -6,
+                    scale: 0.95,
+                  }}
+                  animate={{
+                    opacity: 1,
+                    y: 0,
+                    scale: 1,
+                  }}
+                  exit={{
+                    opacity: 0,
+                    y: -4,
+                    scale: 0.96,
+                  }}
+                  transition={{
+                    duration: 0.16,
+                  }}
+                  className="absolute right-0 top-10 z-50 w-44 rounded-xl border border-base-300 bg-base-100 p-1.5 shadow-xl"
+                >
+                  {/* DOWNLOAD — VIEWER+ */}
+
+                  <motion.button
                     type="button"
-                    aria-label="Close file actions"
-                    onClick={() =>
-                      setMenuOpen(false)
+                    whileHover={{
+                      x: 3,
+                    }}
+                    whileTap={{
+                      scale: 0.97,
+                    }}
+                    onClick={
+                      handleDownload
                     }
-                    className="fixed inset-0 z-40 cursor-default"
-                  />
-
-                  <motion.div
-                    initial={{
-                      opacity: 0,
-                      y: -6,
-                      scale: 0.95,
-                    }}
-                    animate={{
-                      opacity: 1,
-                      y: 0,
-                      scale: 1,
-                    }}
-                    exit={{
-                      opacity: 0,
-                      y: -4,
-                      scale: 0.96,
-                    }}
-                    transition={{
-                      duration: 0.16,
-                    }}
-                    className="absolute right-0 top-10 z-50 w-44 rounded-xl border border-base-300 bg-base-100 p-1.5 shadow-xl"
+                    disabled={
+                      downloadMutation.isPending
+                    }
+                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
                   >
-                    {/* DOWNLOAD */}
+                    {downloadMutation.isPending ? (
+                      <LoaderCircle
+                        size={16}
+                        className="animate-spin"
+                      />
+                    ) : (
+                      <Download
+                        size={16}
+                      />
+                    )}
 
+                    {downloadMutation.isPending
+                      ? "Preparing..."
+                      : "Download"}
+                  </motion.button>
+
+                  {/* SHARE — OWNER ONLY */}
+
+                  {isOwner && (
                     <motion.button
                       type="button"
-                      whileHover={{ x: 3 }}
-                      whileTap={{
-                        scale: 0.97,
+                      whileHover={{
+                        x: 3,
                       }}
-                      onClick={
-                        handleDownload
-                      }
-                      disabled={
-                        downloadMutation.isPending
-                      }
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
-                    >
-                      {downloadMutation.isPending ? (
-                        <LoaderCircle
-                          size={16}
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <Download size={16} />
-                      )}
-
-                      {downloadMutation.isPending
-                        ? "Preparing..."
-                        : "Download"}
-                    </motion.button>
-
-                    {/* SHARE */}
-
-                    <motion.button
-                      type="button"
-                      whileHover={{ x: 3 }}
                       whileTap={{
                         scale: 0.97,
                       }}
@@ -266,15 +360,21 @@ export default function FileCard({
                       }
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
                     >
-                      <Share2 size={16} />
+                      <Share2
+                        size={16}
+                      />
                       Share
                     </motion.button>
+                  )}
 
-                    {/* RENAME */}
+                  {/* RENAME — EDITOR / OWNER */}
 
+                  {canEdit && (
                     <motion.button
                       type="button"
-                      whileHover={{ x: 3 }}
+                      whileHover={{
+                        x: 3,
+                      }}
                       whileTap={{
                         scale: 0.97,
                       }}
@@ -289,12 +389,16 @@ export default function FileCard({
 
                       Rename
                     </motion.button>
+                  )}
 
-                    {/* MOVE */}
+                  {/* MOVE — EDITOR / OWNER */}
 
+                  {canEdit && (
                     <motion.button
                       type="button"
-                      whileHover={{ x: 3 }}
+                      whileHover={{
+                        x: 3,
+                      }}
                       whileTap={{
                         scale: 0.97,
                       }}
@@ -303,43 +407,57 @@ export default function FileCard({
                       }
                       className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition hover:bg-base-200"
                     >
-                      <MoveRight size={16} />
+                      <MoveRight
+                        size={16}
+                      />
                       Move
                     </motion.button>
+                  )}
 
-                    <div className="my-1 border-t border-base-300" />
+                  {/* TRASH — OWNER ONLY */}
 
-                    {/* TRASH */}
+                  {isOwner && (
+                    <>
+                      <div className="my-1 border-t border-base-300" />
 
-                    <motion.button
-                      type="button"
-                      whileHover={{ x: 3 }}
-                      whileTap={{
-                        scale: 0.97,
-                      }}
-                      onClick={
-                        handleTrash
-                      }
-                      disabled={
-                        trashMutation.isPending
-                      }
-                      className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-error transition hover:bg-error/10"
-                    >
-                      {trashMutation.isPending ? (
-                        <LoaderCircle
-                          size={16}
-                          className="animate-spin"
-                        />
-                      ) : (
-                        <Trash2 size={16} />
-                      )}
+                      <motion.button
+                        type="button"
+                        whileHover={{
+                          x: 3,
+                        }}
+                        whileTap={{
+                          scale: 0.97,
+                        }}
+                        onClick={
+                          handleTrash
+                        }
+                        disabled={
+                          trashMutation.isPending
+                        }
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-error transition hover:bg-error/10"
+                      >
+                        {trashMutation.isPending ? (
+                          <LoaderCircle
+                            size={
+                              16
+                            }
+                            className="animate-spin"
+                          />
+                        ) : (
+                          <Trash2
+                            size={
+                              16
+                            }
+                          />
+                        )}
 
-                      {trashMutation.isPending
-                        ? "Moving..."
-                        : "Move to trash"}
-                    </motion.button>
-                  </motion.div>
-                </>
+                        {trashMutation.isPending
+                          ? "Moving..."
+                          : "Move to trash"}
+                      </motion.button>
+                    </>
+                  )}
+                </motion.div>
               )}
             </AnimatePresence>
           </div>
@@ -353,7 +471,9 @@ export default function FileCard({
 
         <div className="mt-1 flex gap-2 text-xs opacity-40">
           <span>
-            {formatBytes(file.size)}
+            {formatBytes(
+              file.size
+            )}
           </span>
 
           <span>•</span>
@@ -364,8 +484,6 @@ export default function FileCard({
             ).toLocaleDateString()}
           </span>
         </div>
-
-        {/* ==================== ERROR ==================== */}
 
         {error && (
           <motion.p
@@ -384,38 +502,46 @@ export default function FileCard({
         )}
       </motion.article>
 
-      {/* ==================== RENAME MODAL ==================== */}
+      {/* ==================== RENAME ==================== */}
 
-      <RenameModal
-        open={renameOpen}
-        onClose={() =>
-          setRenameOpen(false)
-        }
-        item={file}
-        type="file"
-      />
+      {canEdit && (
+        <RenameModal
+          open={renameOpen}
+          onClose={() =>
+            setRenameOpen(false)
+          }
+          item={file}
+          type="file"
+        />
+      )}
 
-      {/* ==================== MOVE MODAL ==================== */}
+      {/* ==================== MOVE ==================== */}
 
-      <MoveModal
-        open={moveOpen}
-        onClose={() =>
-          setMoveOpen(false)
-        }
-        item={file}
-        type="file"
-      />
+      {canEdit && (
+        <MoveModal
+          open={moveOpen}
+          onClose={() =>
+            setMoveOpen(false)
+          }
+          item={file}
+          type="file"
+          permission={permission}
+          sharedRootId={sharedRootId}
+        />
+      )}
 
-      {/* ==================== SHARE MODAL ==================== */}
+      {/* ==================== SHARE ==================== */}
 
-      <ShareModal
-        open={shareOpen}
-        onClose={() =>
-          setShareOpen(false)
-        }
-        item={file}
-        type="file"
-      />
+      {isOwner && (
+        <ShareModal
+          open={shareOpen}
+          onClose={() =>
+            setShareOpen(false)
+          }
+          item={file}
+          type="file"
+        />
+      )}
     </>
   );
 }

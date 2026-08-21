@@ -160,27 +160,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <div className="flex gap-2">
-          <motion.button
-            type="button"
-            whileHover={{ y: -2, scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            className="btn btn-outline btn-sm rounded-xl"
-          >
-            <Plus size={16} />
-            New folder
-          </motion.button>
-
-          <motion.button
-            type="button"
-            whileHover={{ y: -2, scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            className="btn btn-neutral btn-sm rounded-xl"
-          >
-            <Upload size={16} />
-            Upload
-          </motion.button>
-        </div>
+       
       </motion.section>
 
       {/* ==================== OVERVIEW ==================== */}

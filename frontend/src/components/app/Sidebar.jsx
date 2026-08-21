@@ -14,6 +14,7 @@ import {
   X,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
 } from "lucide-react";
 
 import { AnimatePresence, motion } from "framer-motion";
@@ -28,6 +29,11 @@ const navItems = [
     label: "My Files",
     href: "/files",
     icon: Files,
+  },
+  {
+    label: "Search",
+    href: "/search",
+    icon: Search,
   },
   {
     label: "Shared",
@@ -140,7 +146,6 @@ function SidebarContent({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-
       {/* ==================== BRAND ==================== */}
 
       <div
@@ -254,9 +259,7 @@ function SidebarContent({
 
                   {!collapsed && (
                     <>
-                      <span className="whitespace-nowrap">
-                        {item.label}
-                      </span>
+                      <span className="whitespace-nowrap">{item.label}</span>
 
                       {active && (
                         <motion.span

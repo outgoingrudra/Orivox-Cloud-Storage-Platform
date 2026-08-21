@@ -1,22 +1,8 @@
 "use client";
 
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-
-import {
-  useRouter,
-  useSearchParams,
-} from "next/navigation";
-
-import {
-  LoaderCircle,
-  RefreshCw,
-} from "lucide-react";
-
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { LoaderCircle, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { useExplorer } from "@/features/files/useExplorer";
@@ -31,73 +17,42 @@ import CreateFolderModal from "@/features/files/components/CreateFolderModal";
 import UploadModal from "@/features/files/components/UploadModal";
 
 export default function FilesPage() {
-  const router =
-    useRouter();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const searchParams =
-    useSearchParams();
+  const folderId = searchParams.get("folder");
 
-  const folderId =
-    searchParams.get("folder");
+  // Shared-folder navigation information
+  const isSharedView = searchParams.get("shared") === "true";
+  const sharedRoot = searchParams.get("sharedRoot");
 
-  // ==================== FILTER / VIEW STATE ====================
+  const [search, setSearch] = useState("");
+  const [type, setType] = useState("");
+  const [contentFilter, setContentFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("name");
+  const [order, setOrder] = useState("asc");
+  const [view, setView] = useState("grid");
 
-  const [search, setSearch] =
-    useState("");
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
 
-  /*
-    File-specific type filter:
-    image / video / audio / document / etc.
-  */
-  const [type, setType] =
-    useState("");
-
-  /*
-    Explorer-level content filter:
-    all / files / folders
-  */
-  const [
-    contentFilter,
-    setContentFilter,
-  ] = useState("all");
-
-  const [sortBy, setSortBy] =
-    useState("name");
-
-  const [order, setOrder] =
-    useState("asc");
-
-  const [view, setView] =
-    useState("grid");
-
-  // ==================== MODALS ====================
-
-  const [
-    createFolderOpen,
-    setCreateFolderOpen,
-  ] = useState(false);
-
-  const [
-    uploadOpen,
-    setUploadOpen,
-  ] = useState(false);
-
-  // ==================== INFINITE SCROLL ====================
-
-  const loadMoreRef =
-    useRef(null);
-
-  // ==================== FOLDER DETAILS ====================
+  const loadMoreRef = useRef(null);
 
   const {
     data: folderDetails,
-    isLoading:
-      folderDetailsLoading,
-  } = useFolderDetails(
-    folderId
-  );
+    isLoading: folderDetailsLoading,
+  } = useFolderDetails(folderId);
 
-  // ==================== EXPLORER ====================
+  // =====================================================
+  // SHARED FOLDER PERMISSION
+  // =====================================================
+
+  const permission = folderDetails?.permission;
+
+  const canEdit =
+    !isSharedView ||
+    permission === "OWNER" ||
+    permission === "EDITOR";
 
   const {
     data,
@@ -123,71 +78,50 @@ export default function FilesPage() {
   // =====================================================
 
   const folders = useMemo(
-    () =>
-      data?.pages.flatMap(
-        (page) =>
-          page.folders || []
-      ) || [],
-    [data]
+    () => data?.pages.flatMap((page) => page.folders || []) || [],
+    [data],
   );
 
   const files = useMemo(
-    () =>
-      data?.pages.flatMap(
-        (page) =>
-          page.files || []
-      ) || [],
-    [data]
+    () => data?.pages.flatMap((page) => page.files || []) || [],
+    [data],
   );
 
-  const itemsCount =
-    folders.length +
-    files.length;
+  const itemsCount = folders.length + files.length;
 
   // =====================================================
   // INFINITE SCROLL
   // =====================================================
 
   useEffect(() => {
-    const target =
-      loadMoreRef.current;
-
+    const target = loadMoreRef.current;
     if (!target) return;
 
-    const observer =
-      new IntersectionObserver(
-        (entries) => {
-          const entry =
-            entries[0];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
 
-          if (
-            entry.isIntersecting &&
-            hasNextPage &&
-            !isFetchingNextPage
-          ) {
-            fetchNextPage();
-          }
-        },
-        {
-          root: null,
-          rootMargin:
-            "250px",
-          threshold: 0,
+        if (
+          entry.isIntersecting &&
+          hasNextPage &&
+          !isFetchingNextPage
+        ) {
+          fetchNextPage();
         }
-      );
-
-    observer.observe(
-      target
+      },
+      {
+        root: null,
+        rootMargin: "250px",
+        threshold: 0,
+      },
     );
+
+    observer.observe(target);
 
     return () => {
       observer.disconnect();
     };
-  }, [
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  ]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   // =====================================================
   // NAVIGATION
@@ -197,33 +131,39 @@ export default function FilesPage() {
     setSearch("");
     setType("");
 
-    /*
-      Keep contentFilter unchanged.
+    // Keep shared-folder context while navigating
+    // through nested folders.
+    if (isSharedView && sharedRoot) {
+      router.push(
+        `/files?folder=${encodeURIComponent(id)}&shared=true&sharedRoot=${encodeURIComponent(sharedRoot)}`,
+      );
+      return;
+    }
 
-      Example:
-      If the user selects "Folders",
-      entering another folder should
-      still show only folders.
-    */
-
-    router.push(
-      `/files?folder=${encodeURIComponent(
-        id
-      )}`
-    );
+    router.push(`/files?folder=${encodeURIComponent(id)}`);
   }
 
   function goToRoot() {
     setSearch("");
     setType("");
 
-    router.push(
-      "/files"
-    );
+    // Shared users return to Shared With Me.
+    if (isSharedView) {
+      router.push("/shared");
+      return;
+    }
+
+    router.push("/files");
   }
 
   function handleUpload() {
+    if (!canEdit) return;
     setUploadOpen(true);
+  }
+
+  function handleCreateFolder() {
+    if (!canEdit) return;
+    setCreateFolderOpen(true);
   }
 
   // =====================================================
@@ -279,179 +219,149 @@ export default function FilesPage() {
         </h2>
 
         <p className="mt-2 text-sm opacity-60">
-          {error?.response
-            ?.data
-            ?.message ||
+          {error?.response?.data?.message ||
             "Something went wrong while loading your workspace."}
         </p>
 
         <button
           type="button"
-          onClick={() =>
-            refetch()
-          }
+          onClick={() => refetch()}
           className="btn btn-neutral btn-sm mt-5 rounded-xl"
         >
-          <RefreshCw
-            size={15}
-          />
-
+          <RefreshCw size={15} />
           Try again
         </button>
       </motion.div>
     );
   }
 
-  // =====================================================
-  // EMPTY STATE CONTEXT
-  // =====================================================
-
   const searching =
-    Boolean(
-      search.trim()
-    ) ||
+    Boolean(search.trim()) ||
     Boolean(type) ||
-    contentFilter !==
-      "all";
-
-  // =====================================================
-  // PAGE
-  // =====================================================
+    contentFilter !== "all";
 
   return (
     <div className="mx-auto max-w-7xl">
+
       {/* ==================== HEADER ==================== */}
 
       <ExplorerHeader
-        title={
-          folderDetails?.folder
-            ?.name ||
-          "My Files"
-        }
-        itemsCount={
-          itemsCount
-        }
-        onCreateFolder={() =>
-          setCreateFolderOpen(
-            true
-          )
+        title={folderDetails?.folder?.name || "My Files"}
+        itemsCount={itemsCount}
+        onCreateFolder={
+          canEdit
+            ? handleCreateFolder
+            : undefined
         }
         onUpload={
-          handleUpload
+          canEdit
+            ? handleUpload
+            : undefined
         }
       />
+
+      {/* ==================== SHARED ACCESS INFO ==================== */}
+
+      {isSharedView && permission && (
+        <motion.div
+          initial={{
+            opacity: 0,
+            y: -4,
+          }}
+          animate={{
+            opacity: 0.5,
+            y: 0,
+          }}
+          className="mt-3 flex items-center gap-2 text-xs"
+        >
+          <span>Shared folder</span>
+          <span>•</span>
+
+          <span className="font-semibold">
+            {permission === "EDITOR"
+              ? "Can view and edit"
+              : permission === "OWNER"
+                ? "Owner"
+                : "View only"}
+          </span>
+        </motion.div>
+      )}
 
       {/* ==================== BREADCRUMB ==================== */}
 
       <ExplorerBreadcrumbs
-        folderId={
-          folderId
-        }
-        path={
-          folderDetails?.path ||
-          []
-        }
-        loading={
-          folderDetailsLoading
-        }
-        onOpenFolder={
-          openFolder
-        }
-        onRoot={
-          goToRoot
-        }
+        folderId={folderId}
+        path={folderDetails?.path || []}
+        loading={folderDetailsLoading}
+        onOpenFolder={openFolder}
+        onRoot={goToRoot}
       />
 
       {/* ==================== TOOLBAR ==================== */}
 
       <ExplorerToolbar
         search={search}
-        setSearch={
-          setSearch
-        }
-
+        setSearch={setSearch}
         type={type}
-        setType={
-          setType
-        }
-
-        contentFilter={
-          contentFilter
-        }
-        setContentFilter={
-          setContentFilter
-        }
-
-        sortBy={
-          sortBy
-        }
-        setSortBy={
-          setSortBy
-        }
-
+        setType={setType}
+        contentFilter={contentFilter}
+        setContentFilter={setContentFilter}
+        sortBy={sortBy}
+        setSortBy={setSortBy}
         order={order}
-        setOrder={
-          setOrder
-        }
-
+        setOrder={setOrder}
         view={view}
-        setView={
-          setView
-        }
+        setView={setView}
       />
 
       {/* ==================== BACKGROUND REFETCH ==================== */}
 
-      {isFetching &&
-        !isFetchingNextPage && (
-          <motion.div
-            initial={{
-              opacity: 0,
-              y: -4,
-            }}
-            animate={{
-              opacity: 0.45,
-              y: 0,
-            }}
-            className="mt-3 flex items-center gap-2 text-xs"
-          >
-            <LoaderCircle
-              size={13}
-              className="animate-spin"
-            />
+      {isFetching && !isFetchingNextPage && (
+        <motion.div
+          initial={{
+            opacity: 0,
+            y: -4,
+          }}
+          animate={{
+            opacity: 0.45,
+            y: 0,
+          }}
+          className="mt-3 flex items-center gap-2 text-xs"
+        >
+          <LoaderCircle
+            size={13}
+            className="animate-spin"
+          />
 
-            Updating results...
-          </motion.div>
-        )}
+          Updating results...
+        </motion.div>
+      )}
 
       {/* ==================== CONTENT ==================== */}
 
       {itemsCount === 0 ? (
         <EmptyExplorer
-          searching={
-            searching
-          }
-          onCreateFolder={() =>
-            setCreateFolderOpen(
-              true
-            )
+          searching={searching}
+          onCreateFolder={
+            canEdit
+              ? handleCreateFolder
+              : undefined
           }
           onUpload={
-            handleUpload
+            canEdit
+              ? handleUpload
+              : undefined
           }
         />
       ) : (
         <ExplorerList
-          folders={
-            folders
-          }
-          files={
-            files
-          }
+          folders={folders}
+          files={files}
           view={view}
-          onOpenFolder={
-            openFolder
-          }
+          onOpenFolder={openFolder}
+          permission={permission}
+          sharedRootId={sharedRoot}
+          isSharedView={isSharedView}
         />
       )}
 
@@ -459,9 +369,7 @@ export default function FilesPage() {
 
       {itemsCount > 0 && (
         <div
-          ref={
-            loadMoreRef
-          }
+          ref={loadMoreRef}
           className="flex min-h-24 items-center justify-center py-6"
         >
           {isFetchingNextPage ? (
@@ -497,8 +405,7 @@ export default function FilesPage() {
               }}
               className="text-xs"
             >
-              You&apos;ve
-              reached the end
+              You&apos;ve reached the end
             </motion.span>
           )}
         </div>
@@ -507,41 +414,23 @@ export default function FilesPage() {
       {/* ==================== CREATE FOLDER ==================== */}
 
       <CreateFolderModal
-        open={
-          createFolderOpen
-        }
+        open={createFolderOpen}
         onClose={() =>
-          setCreateFolderOpen(
-            false
-          )
+          setCreateFolderOpen(false)
         }
-        parentId={
-          folderId
-        }
-        parentName={
-          folderDetails?.folder
-            ?.name
-        }
+        parentId={folderId}
+        parentName={folderDetails?.folder?.name}
       />
 
       {/* ==================== UPLOAD ==================== */}
 
       <UploadModal
-        open={
-          uploadOpen
-        }
+        open={uploadOpen}
         onClose={() =>
-          setUploadOpen(
-            false
-          )
+          setUploadOpen(false)
         }
-        folderId={
-          folderId
-        }
-        folderName={
-          folderDetails?.folder
-            ?.name
-        }
+        folderId={folderId}
+        folderName={folderDetails?.folder?.name}
       />
     </div>
   );

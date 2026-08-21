@@ -28,19 +28,14 @@ export default function SharedPage() {
   const folderShares = payload.folderShares ?? payload.folders ?? [];
 
   const total = fileShares.length + folderShares.length;
+  function handleOpenFolder(folder) {
+    if (!folder?.id) return;
 
-  function handleOpenFolder(shareFolder) {
-    if (!shareFolder?.id) return;
-
-    /*
-      We'll connect shared-folder navigation properly
-      once we verify the existing authenticated folder
-      route + permission behavior.
-
-      Do NOT invent another backend route here.
-    */
-
-    router.push(`/folders/${shareFolder.id}`);
+    router.push(
+      `/files?folder=${encodeURIComponent(
+        folder.id,
+      )}&shared=true&sharedRoot=${encodeURIComponent(folder.id)}`,
+    );
   }
 
   if (isLoading) {

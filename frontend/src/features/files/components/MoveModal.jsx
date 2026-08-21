@@ -13,6 +13,8 @@ export default function MoveModal({
   onClose,
   item,
   type,
+  permission,
+  sharedRootId,
 }) {
   const [currentFolderId, setCurrentFolderId] = useState(null);
   const [folders, setFolders] = useState([]);
@@ -29,6 +31,12 @@ export default function MoveModal({
     moveFileMutation.isPending ||
     moveFolderMutation.isPending;
 
+  const isShared = Boolean(sharedRootId);
+  const canMove =
+    !isShared ||
+    permission === "EDITOR" ||
+    permission === "OWNER";
+
   // =====================================================
   // RESET WHEN OPENED
   // =====================================================
@@ -36,12 +44,24 @@ export default function MoveModal({
   useEffect(() => {
     if (!open) return;
 
-    setCurrentFolderId(null);
-    setSelectedFolderId(null);
+    /*
+      Normal workspace:
+        root = null
+
+      Shared workspace:
+        root = sharedRootId
+
+      This prevents the move picker from escaping
+      outside the shared folder.
+    */
+    const rootId = sharedRootId || null;
+
+    setCurrentFolderId(rootId);
+    setSelectedFolderId(rootId);
     setFolders([]);
     setPath([]);
     setError("");
-  }, [open]);
+  }, [open, sharedRootId]);
 
   // =====================================================
   // LOAD DESTINATION FOLDERS
@@ -49,7 +69,6 @@ export default function MoveModal({
 
   useEffect(() => {
     if (!open) return;
-
     loadFolders(currentFolderId);
   }, [open, currentFolderId]);
 
@@ -112,8 +131,11 @@ export default function MoveModal({
 
   function goToRoot() {
     setPath([]);
-    setCurrentFolderId(null);
-    setSelectedFolderId(null);
+
+    const rootId = sharedRootId || null;
+
+    setCurrentFolderId(rootId);
+    setSelectedFolderId(rootId);
   }
 
   function goToPath(index) {
@@ -124,11 +146,17 @@ export default function MoveModal({
       nextPath[nextPath.length - 1];
 
     setPath(nextPath);
+
     setCurrentFolderId(
-      destination?.id || null
+      destination?.id ||
+        sharedRootId ||
+        null
     );
+
     setSelectedFolderId(
-      destination?.id || null
+      destination?.id ||
+        sharedRootId ||
+        null
     );
   }
 
@@ -138,6 +166,13 @@ export default function MoveModal({
 
   async function handleMove() {
     if (!item || moving) return;
+
+    if (!canMove) {
+      setError(
+        "You only have view permission for this shared folder."
+      );
+      return;
+    }
 
     setError("");
 
@@ -169,6 +204,15 @@ export default function MoveModal({
     setError("");
     onClose();
   }
+
+  const rootLabel =
+    isShared
+      ? "Shared folder"
+      : "My Files";
+
+  // =====================================================
+  // UI
+  // =====================================================
 
   return (
     <AnimatePresence>
@@ -255,7 +299,7 @@ export default function MoveModal({
                         : "opacity-55 hover:bg-base-200 hover:opacity-100"
                     }`}
                   >
-                    My Files
+                    {rootLabel}
                   </button>
 
                   {path.map((folder, index) => (
@@ -325,7 +369,8 @@ export default function MoveModal({
                           x: 0,
                         }}
                         transition={{
-                          delay: index * 0.025,
+                          delay:
+                            index * 0.025,
                         }}
                         whileHover={{
                           x: 3,
@@ -384,7 +429,7 @@ export default function MoveModal({
                 <p className="mt-0.5 truncate text-sm font-semibold">
                   {path.length
                     ? path[path.length - 1].name
-                    : "My Files"}
+                    : rootLabel}
                 </p>
               </div>
 
@@ -403,9 +448,12 @@ export default function MoveModal({
                 <motion.button
                   type="button"
                   onClick={handleMove}
-                  disabled={moving}
+                  disabled={
+                    moving ||
+                    !canMove
+                  }
                   whileHover={
-                    moving
+                    moving || !canMove
                       ? {}
                       : {
                           y: -2,
@@ -413,7 +461,7 @@ export default function MoveModal({
                         }
                   }
                   whileTap={
-                    moving
+                    moving || !canMove
                       ? {}
                       : {
                           scale: 0.97,
@@ -427,7 +475,6 @@ export default function MoveModal({
                         size={16}
                         className="animate-spin"
                       />
-
                       Moving...
                     </>
                   ) : (
