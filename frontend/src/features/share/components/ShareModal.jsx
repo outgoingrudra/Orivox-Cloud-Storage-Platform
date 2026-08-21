@@ -26,14 +26,14 @@ import {
 
 import { useSelector } from "react-redux";
 
-import { useShareItem } from "@/components/features/share/useShareItem";
-import { useItemAccess } from "@/components/features/share/useItemAccess";
-import { useUpdateSharePermission } from "@/components/features/share/useUpdateSharePermission";
-import { useRevokeShare } from "@/components/features/share/useRevokeShare";
+import { useShareItem } from "@/features/share/useShareItem";
+import { useItemAccess } from "@/features/share/useItemAccess";
+import { useUpdateSharePermission } from "@/features/share/useUpdateSharePermission";
+import { useRevokeShare } from "@/features/share/useRevokeShare";
 
-import { useShareLinks } from "@/components/features/share/useShareLinks";
-import { useCreateShareLink } from "@/components/features/share/useCreateShareLink";
-import { useRevokeShareLink } from "@/components/features/share/useRevokeShareLink";
+import { useShareLinks } from "@/features/share/useShareLinks";
+import { useCreateShareLink } from "@/features/share/useCreateShareLink";
+import { useRevokeShareLink } from "@/features/share/useRevokeShareLink";
 
 export default function ShareModal({
   open,

@@ -11,9 +11,9 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { useGlobalSearch } from "@/components/features/search/useGlobalSearch";
-import { useDownloadFile } from "@/components/features/files/useDownloadFile";
-import { formatBytes, getFileIcon } from "@/components/features/files/file.utils";
+import { useGlobalSearch } from "@/features/search/useGlobalSearch";
+import { useDownloadFile } from "@/features/files/useDownloadFile";
+import { formatBytes, getFileIcon } from "@/features/files/file.utils";
 
 export default function SearchPage() {
   const router = useRouter();

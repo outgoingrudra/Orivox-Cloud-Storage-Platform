@@ -8,7 +8,6 @@ import {
   Clipboard,
   CloudUpload,
   Code2,
-  FileDown,
   Files,
   KeyRound,
   LoaderCircle,
@@ -24,42 +23,10 @@ import { motion } from "framer-motion";
 import {
   useDeveloperKeys,
   useRevokeDeveloperKey,
-} from "@/components/features/developer/useDeveloperKeys";
+} from "@/features/developer/useDeveloperKeys";
 
-import CreateApiKeyModal from "@/components/features/developer/components/CreateApiKeyModal";
-
-const endpoints = [
-  {
-    method: "GET",
-    path: "/api/v1/developer/files",
-    title: "List files",
-    description: "List files stored inside your developer uploads space.",
-  },
-  {
-    method: "POST",
-    path: "/api/v1/developer/files",
-    title: "Initiate upload",
-    description: "Create an upload reservation and receive a presigned upload URL.",
-  },
-  {
-    method: "POST",
-    path: "/api/v1/developer/files/:reservationId/confirm",
-    title: "Confirm upload",
-    description: "Finalize the file after it has been uploaded to object storage.",
-  },
-  {
-    method: "GET",
-    path: "/api/v1/developer/files/:fileId",
-    title: "Download file",
-    description: "Receive a secure temporary download URL.",
-  },
-  {
-    method: "DELETE",
-    path: "/api/v1/developer/files/:fileId",
-    title: "Delete file",
-    description: "Permanently delete a developer-managed file.",
-  },
-];
+import CreateApiKeyModal from "@/features/developer/components/CreateApiKeyModal";
+import ApiReference from "@/features/developer/components/ApiReference";
 
 export default function DeveloperPage() {
   const [createOpen, setCreateOpen] = useState(false);
@@ -74,13 +41,18 @@ export default function DeveloperPage() {
 
   const revokeMutation = useRevokeDeveloperKey();
 
-  const activeKeys = keys.filter((key) => !key.revokedAt);
+  const activeKeys = keys.filter(
+    (key) => !key.revokedAt,
+  );
 
   async function copy(text, id) {
     await navigator.clipboard.writeText(text);
+
     setCopied(id);
 
-    setTimeout(() => setCopied(""), 1500);
+    setTimeout(() => {
+      setCopied("");
+    }, 1500);
   }
 
   async function handleRevoke(key) {
@@ -102,7 +74,6 @@ export default function DeveloperPage() {
 
   return (
     <div className="mx-auto max-w-7xl">
-
       {/* ==================== HEADER ==================== */}
 
       <motion.div
@@ -228,18 +199,23 @@ export default function DeveloperPage() {
                           : "badge-success"
                       }`}
                     >
-                      {key.revokedAt ? "Revoked" : "Active"}
+                      {key.revokedAt
+                        ? "Revoked"
+                        : "Active"}
                     </span>
                   </div>
 
                   <code className="mt-1 block text-xs opacity-45">
-                    {key.keyPrefix}••••••••••••
+                    {key.keyPrefix}
+                    ••••••••••••
                   </code>
 
                   <p className="mt-2 text-[11px] opacity-35">
                     Last used:{" "}
                     {key.lastUsedAt
-                      ? new Date(key.lastUsedAt).toLocaleString()
+                      ? new Date(
+                          key.lastUsedAt,
+                        ).toLocaleString()
                       : "Never"}
                   </p>
                 </div>
@@ -247,8 +223,12 @@ export default function DeveloperPage() {
                 {!key.revokedAt && (
                   <button
                     type="button"
-                    onClick={() => handleRevoke(key)}
-                    disabled={revokeMutation.isPending}
+                    onClick={() =>
+                      handleRevoke(key)
+                    }
+                    disabled={
+                      revokeMutation.isPending
+                    }
                     className="btn btn-ghost btn-sm rounded-xl text-error"
                   >
                     <Trash2 size={15} />
@@ -271,20 +251,60 @@ export default function DeveloperPage() {
             Authentication
           </h2>
 
-          <p className="mt-2 text-sm leading-6 opacity-60">
-            Send your API key using the Authorization header on every
-            Developer API request.
-          </p>
+        <p className="mt-2 text-sm leading-6 opacity-60">
+  Send your API key using the Authorization header on
+  every Developer API request.
+</p>
 
-          <div className="mt-5 rounded-2xl bg-neutral-content/10 p-4">
-            <code className="break-all text-xs">
-              Authorization: Bearer orvx_live_xxxxxxxxx
-            </code>
-          </div>
+{/* Server-side warning */}
+<div className="mt-5 rounded-2xl border border-warning/20 bg-warning/10 p-4">
+  <div className="flex items-start gap-3">
+    <AlertTriangle
+      size={18}
+      className="mt-0.5 shrink-0 text-warning"
+    />
+
+    <div>
+      <p className="text-sm font-bold">
+        Server-side use only
+      </p>
+
+      <p className="mt-1 text-xs leading-5 opacity-60">
+        Orivox API keys are secret credentials. Use the
+        Developer API from your backend, server, CLI, or
+        another trusted environment. Never expose an API
+        key inside frontend/browser code.
+      </p>
+    </div>
+  </div>
+</div>
+
+{/* Recommended architecture */}
+<div className="mt-4 space-y-2 text-xs">
+  <div className="rounded-xl bg-success/10 px-3 py-2.5">
+    <span className="font-bold text-success">✓ Recommended</span>
+    <code className="ml-2 opacity-70">
+      Frontend → Your Backend → Orivox API
+    </code>
+  </div>
+
+  <div className="rounded-xl bg-error/10 px-3 py-2.5">
+    <span className="font-bold text-error">✕ Avoid</span>
+    <code className="ml-2 opacity-70">
+      Frontend → Orivox API
+    </code>
+  </div>
+</div>
+
+<div className="mt-5 rounded-2xl bg-neutral-content/10 p-4">
+  <code className="break-all text-xs">
+    Authorization: Bearer orvx_live_xxxxxxxxx
+  </code>
+</div>
 
           <p className="mt-4 text-xs leading-5 opacity-45">
-            Never expose API keys in browser-side code or commit them
-            to Git.
+            Never expose API keys in browser-side code or commit
+            them to Git.
           </p>
         </div>
 
@@ -293,6 +313,7 @@ export default function DeveloperPage() {
         <div className="rounded-3xl border border-base-300 bg-base-100 p-6">
           <div className="flex items-center gap-2">
             <Terminal size={18} />
+
             <h2 className="font-bold">
               Quick start
             </h2>
@@ -341,7 +362,7 @@ console.log(result);`}
         <div className="mt-6 grid gap-4 md:grid-cols-3">
           <Step
             number="01"
-            title="Initiate"
+            title="Start"
             text="Send filename, MIME type and size to Orivox."
           />
 
@@ -359,75 +380,9 @@ console.log(result);`}
         </div>
       </section>
 
-      {/* ==================== ENDPOINTS ==================== */}
+      {/* ==================== API DOCUMENTATION ==================== */}
 
-      <section className="mt-8">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.16em] opacity-40">
-            API Reference
-          </p>
-
-          <h2 className="mt-2 text-2xl font-black">
-            File endpoints
-          </h2>
-
-          <p className="mt-2 text-sm opacity-45">
-            Developer API access is intentionally limited to files.
-            Folder creation is not available.
-          </p>
-        </div>
-
-        <div className="mt-5 space-y-3">
-          {endpoints.map((endpoint) => (
-            <motion.div
-              key={`${endpoint.method}-${endpoint.path}`}
-              whileHover={{ x: 3 }}
-              className="rounded-2xl border border-base-300 bg-base-100 p-4"
-            >
-              <div className="flex flex-col gap-3 md:flex-row md:items-center">
-                <span className="badge badge-neutral w-20">
-                  {endpoint.method}
-                </span>
-
-                <code className="min-w-0 flex-1 break-all text-sm">
-                  {endpoint.path}
-                </code>
-
-                <button
-                  type="button"
-                  onClick={() =>
-                    copy(
-                      endpoint.path,
-                      endpoint.path,
-                    )
-                  }
-                  className="btn btn-ghost btn-sm rounded-xl"
-                >
-                  {copied === endpoint.path ? (
-                    <Check size={15} />
-                  ) : (
-                    <Clipboard size={15} />
-                  )}
-
-                  {copied === endpoint.path
-                    ? "Copied"
-                    : "Copy"}
-                </button>
-              </div>
-
-              <div className="mt-3 md:ml-[5.75rem]">
-                <p className="text-sm font-semibold">
-                  {endpoint.title}
-                </p>
-
-                <p className="mt-1 text-xs opacity-45">
-                  {endpoint.description}
-                </p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
+      <ApiReference />
 
       {/* ==================== LIMITS ==================== */}
 
@@ -446,15 +401,20 @@ console.log(result);`}
             <p className="mt-2 text-sm leading-6 opacity-55">
               The current free plan allows 1 API key and 1,000
               Developer API calls per month. Developer files share
-              the same Orivox storage quota as your normal workspace.
+              the same Orivox storage quota as your normal
+              workspace.
             </p>
           </div>
         </div>
       </section>
 
+      {/* ==================== CREATE KEY MODAL ==================== */}
+
       <CreateApiKeyModal
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() =>
+          setCreateOpen(false)
+        }
       />
     </div>
   );
@@ -468,12 +428,23 @@ function StatCard({
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 15 }}
-      animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -3 }}
+      initial={{
+        opacity: 0,
+        y: 15,
+      }}
+      animate={{
+        opacity: 1,
+        y: 0,
+      }}
+      whileHover={{
+        y: -3,
+      }}
       className="rounded-2xl border border-base-300 bg-base-100 p-5"
     >
-      <Icon size={18} className="opacity-45" />
+      <Icon
+        size={18}
+        className="opacity-45"
+      />
 
       <p className="mt-4 text-xs font-semibold opacity-40">
         {label}
@@ -522,7 +493,9 @@ function CodeBlock({
     <div className="relative mt-5 rounded-2xl bg-neutral p-4 text-neutral-content">
       <button
         type="button"
-        onClick={() => onCopy(code, id)}
+        onClick={() =>
+          onCopy(code, id)
+        }
         className="btn btn-ghost btn-xs absolute right-2 top-2 text-neutral-content"
       >
         {copied === id ? (
@@ -533,7 +506,9 @@ function CodeBlock({
       </button>
 
       <pre className="overflow-x-auto pr-8 text-xs leading-6">
-        <code>{code}</code>
+        <code>
+          {code}
+        </code>
       </pre>
     </div>
   );

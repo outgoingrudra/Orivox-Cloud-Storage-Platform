@@ -16,7 +16,7 @@ import {
 import { motion } from "framer-motion";
 import { useSelector } from "react-redux";
 
-import { useUpdateProfile } from "@/components/features/settings/useUpdateProfile";
+import { useUpdateProfile } from "@/features/settings/useUpdateProfile";
 
 export default function ProfileSettings() {
   const user = useSelector(

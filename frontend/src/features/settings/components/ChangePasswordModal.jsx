@@ -16,7 +16,7 @@ import {
   motion,
 } from "framer-motion";
 
-import { useChangePassword } from "@/components/features/settings/useChangePassword";
+import { useChangePassword } from "@/features/settings/useChangePassword";
 
 export default function ChangePasswordModal({
   open,

@@ -15,12 +15,12 @@ import {
 
 import { motion } from "framer-motion";
 
-import { useSessions } from "@/components/features/settings/useSessions";
-import { useRevokeSession } from "@/components/features/settings/useRevokeSession";
-import { useLogoutOthers } from "@/components/features/settings/useLogoutOthers";
-import { useLogoutAll } from "@/components/features/settings/useLogoutAll";
+import { useSessions } from "@/features/settings/useSessions";
+import { useRevokeSession } from "@/features/settings/useRevokeSession";
+import { useLogoutOthers } from "@/features/settings/useLogoutOthers";
+import { useLogoutAll } from "@/features/settings/useLogoutAll";
 
-import ChangePasswordModal from "@/components/features/settings/components/ChangePasswordModal";
+import ChangePasswordModal from "@/features/settings/components/ChangePasswordModal";
 
 function getDeviceInfo(userAgent = "") {
   const value = userAgent.toLowerCase();

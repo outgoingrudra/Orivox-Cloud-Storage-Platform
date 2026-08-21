@@ -21,13 +21,13 @@ import {
   motion,
 } from "framer-motion";
 
-import { useTrashFile } from "@/components/features/files/useTrashFile";
-import { useDownloadFile } from "@/components/features/files/useDownloadFile";
+import { useTrashFile } from "@/features/files/useTrashFile";
+import { useDownloadFile } from "@/features/files/useDownloadFile";
 
-import RenameModal from "@/components/features/files/components/RenameModal";
-import MoveModal from "@/components/features/files/components/MoveModal";
+import RenameModal from "@/features/files/components/RenameModal";
+import MoveModal from "@/features/files/components/MoveModal";
 
-import ShareModal from "@/components/features/share/components/ShareModal";
+import ShareModal from "@/features/share/components/ShareModal";
 
 import {
   formatBytes,

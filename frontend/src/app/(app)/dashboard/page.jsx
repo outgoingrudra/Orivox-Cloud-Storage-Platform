@@ -18,7 +18,7 @@ import {
 
 import { motion } from "framer-motion";
 
-import { useDashboard } from "@/components/features/dashboard/useDashboard";
+import { useDashboard } from "@/features/dashboard/useDashboard";
 
 function formatBytes(bytes = 0) {
   if (!bytes) return "0 B";

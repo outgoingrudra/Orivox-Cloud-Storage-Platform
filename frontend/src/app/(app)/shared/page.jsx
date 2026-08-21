@@ -4,9 +4,9 @@ import { useRouter } from "next/navigation";
 import { Files, FolderOpen, LoaderCircle, Share2 } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { useSharedWithMe } from "@/components/features/share/useSharedWithMe";
-import SharedFileCard from "@/components/features/share/components/SharedFileCard";
-import SharedFolderCard from "@/components/features/share/components/SharedFolderCard";
+import { useSharedWithMe } from "@/features/share/useSharedWithMe";
+import SharedFileCard from "@/features/share/components/SharedFileCard";
+import SharedFolderCard from "@/features/share/components/SharedFolderCard";
 
 export default function SharedPage() {
   const router = useRouter();

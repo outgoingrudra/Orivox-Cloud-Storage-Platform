@@ -5,8 +5,8 @@ import { Folder, LoaderCircle, MoveRight, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { api } from "@/lib/api";
-import { useMoveFile } from "@/components/features/files/useMoveFile";
-import { useMoveFolder } from "@/components/features/files/useMoveFolder";
+import { useMoveFile } from "@/features/files/useMoveFile";
+import { useMoveFolder } from "@/features/files/useMoveFolder";
 
 export default function MoveModal({
   open,

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSelector } from "react-redux";
-import { useDashboard } from "@/components/features/dashboard/useDashboard";
+import { useDashboard } from "@/features/dashboard/useDashboard";
 import {
   Gauge,
   Files,

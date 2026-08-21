@@ -5,16 +5,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 
-import { useExplorer } from "@/components/features/files/useExplorer";
-import { useFolderDetails } from "@/components/features/files/useFolderDetails";
+import { useExplorer } from "@/features/files/useExplorer";
+import { useFolderDetails } from "@/features/files/useFolderDetails";
 
-import ExplorerHeader from "@/components/features/files/components/ExplorerHeader";
-import ExplorerBreadcrumbs from "@/components/features/files/components/ExplorerBreadcrumbs";
-import ExplorerToolbar from "@/components/features/files/components/ExplorerToolbar";
-import ExplorerList from "@/components/features/files/components/ExplorerList";
-import EmptyExplorer from "@/components/features/files/components/EmptyExplorer";
-import CreateFolderModal from "@/components/features/files/components/CreateFolderModal";
-import UploadModal from "@/components/features/files/components/UploadModal";
+import ExplorerHeader from "@/features/files/components/ExplorerHeader";
+import ExplorerBreadcrumbs from "@/features/files/components/ExplorerBreadcrumbs";
+import ExplorerToolbar from "@/features/files/components/ExplorerToolbar";
+import ExplorerList from "@/features/files/components/ExplorerList";
+import EmptyExplorer from "@/features/files/components/EmptyExplorer";
+import CreateFolderModal from "@/features/files/components/CreateFolderModal";
+import UploadModal from "@/features/files/components/UploadModal";
 
 export default function FilesPage() {
   const router = useRouter();

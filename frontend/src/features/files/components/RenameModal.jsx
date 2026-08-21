@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { FilePenLine, LoaderCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 
-import { useRenameFile } from "@/components/features/files/useRenameFile";
-import { useRenameFolder } from "@/components/features/files/useRenameFolder";
+import { useRenameFile } from "@/features/files/useRenameFile";
+import { useRenameFolder } from "@/features/files/useRenameFolder";
 
 export default function RenameModal({
   open,

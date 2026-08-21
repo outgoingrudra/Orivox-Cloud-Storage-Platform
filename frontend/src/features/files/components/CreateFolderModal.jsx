@@ -16,7 +16,7 @@ import {
 
 import {
   useCreateFolder,
-} from "@/components/features/files/useCreateFolder";
+} from "@/features/files/useCreateFolder";
 
 export default function CreateFolderModal({
   open,
