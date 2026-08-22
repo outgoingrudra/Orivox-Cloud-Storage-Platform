@@ -4,27 +4,50 @@ let connection;
 let channel;
 
 export const connectRabbitMQ = async () => {
-  connection = await amqp.connect(process.env.RABBITMQ_URL);
+  connection = await amqp.connect(
+    process.env.RABBITMQ_URL
+  );
 
   channel = await connection.createChannel();
 
-  await channel.assertQueue("email.verification", {
-    durable: true,
-  });
+  // ==================== EMAIL QUEUES ====================
 
-  await channel.assertQueue("password.reset", {
-    durable: true,
-  });
-  await channel.assertQueue("storage.deletion", {
-    durable: true,
-  });
+  await channel.assertQueue(
+    "email.verification",
+    {
+      durable: true,
+    }
+  );
 
-  
+  await channel.assertQueue(
+    "password.reset",
+    {
+      durable: true,
+    }
+  );
+
+  await channel.assertQueue(
+    "email.welcome",
+    {
+      durable: true,
+    }
+  );
+
+  // ==================== STORAGE QUEUES ====================
+
+  await channel.assertQueue(
+    "storage.deletion",
+    {
+      durable: true,
+    }
+  );
 };
 
 export const getChannel = () => {
   if (!channel) {
-    throw new Error("RabbitMQ channel not initialized");
+    throw new Error(
+      "RabbitMQ channel not initialized"
+    );
   }
 
   return channel;

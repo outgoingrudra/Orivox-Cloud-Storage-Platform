@@ -11,6 +11,7 @@ import { AppError } from "../../utils/AppError.js";
 import {
   publishVerificationEmail,
   publishPasswordResetEmail,
+  publishWelcomeEmail
 } from "./auth.publisher.js";
 
 // ==================== CONSTANTS ====================
@@ -142,45 +143,131 @@ export const registerUser = async ({
 
 // ==================== VERIFY EMAIL ====================
 
+// ==================== VERIFY EMAIL ====================
+
 export const verifyEmail = async (token) => {
   const tokenHash = hashToken(token);
 
-  const verificationToken = await prisma.emailVerificationToken.findUnique({
-    where: { tokenHash },
-  });
+  const verificationToken =
+    await prisma.emailVerificationToken.findUnique({
+      where: {
+        tokenHash,
+      },
+    });
 
   if (!verificationToken) {
-    throw new AppError("Invalid verification link", 400);
+    throw new AppError(
+      "Invalid verification link",
+      400
+    );
   }
 
-  if (verificationToken.expiresAt < new Date()) {
-    // Remove useless expired token
+  if (
+    verificationToken.expiresAt <
+    new Date()
+  ) {
     await prisma.emailVerificationToken.delete({
       where: {
         id: verificationToken.id,
       },
     });
 
-    throw new AppError("Verification link expired", 400);
+    throw new AppError(
+      "Verification link expired",
+      400
+    );
   }
 
-  await prisma.$transaction([
-    prisma.user.update({
-      where: {
-        id: verificationToken.userId,
-      },
+  // =====================================================
+  // VERIFY ATOMICALLY
+  // =====================================================
 
-      data: {
-        isVerified: true,
-      },
-    }),
+  const result =
+    await prisma.$transaction(
+      async (tx) => {
+        /*
+          updateMany allows us to verify only when:
 
-    prisma.emailVerificationToken.deleteMany({
-      where: {
-        userId: verificationToken.userId,
-      },
-    }),
-  ]);
+          isVerified: false → true
+
+          If two verification requests race,
+          only one request can get count = 1.
+        */
+
+        const verified =
+          await tx.user.updateMany({
+            where: {
+              id: verificationToken.userId,
+              isVerified: false,
+            },
+
+            data: {
+              isVerified: true,
+            },
+          });
+
+        const user =
+          await tx.user.findUnique({
+            where: {
+              id: verificationToken.userId,
+            },
+
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              isVerified: true,
+            },
+          });
+
+        if (!user) {
+          throw new AppError(
+            "User not found",
+            404
+          );
+        }
+
+        // Verification links become unusable.
+        await tx.emailVerificationToken.deleteMany({
+          where: {
+            userId:
+              verificationToken.userId,
+          },
+        });
+
+        return {
+          user,
+          newlyVerified:
+            verified.count === 1,
+        };
+      }
+    );
+
+  // =====================================================
+  // WELCOME EMAIL
+  // =====================================================
+
+  /*
+    RabbitMQ is external infrastructure,
+    so publish only AFTER PostgreSQL commits.
+
+    Verification must remain successful even
+    if the email queue is temporarily down.
+  */
+
+  if (result.newlyVerified) {
+    try {
+      publishWelcomeEmail({
+        email: result.user.email,
+        name: result.user.name,
+      });
+    } catch (error) {
+      console.error(
+        "Unable to queue welcome email:",
+        error.message
+      );
+    }
+  }
 
   return true;
 };

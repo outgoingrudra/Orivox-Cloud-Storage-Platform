@@ -32,3 +32,23 @@ export const publishPasswordResetEmail = ({ email, token }) => {
     }
   );
 };
+
+export function publishWelcomeEmail({
+  email,
+  name,
+}) {
+  const channel = getChannel();
+
+  channel.sendToQueue(
+    "email.welcome",
+    Buffer.from(
+      JSON.stringify({
+        email,
+        name,
+      })
+    ),
+    {
+      persistent: true,
+    }
+  );
+}

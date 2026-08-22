@@ -1,65 +1,174 @@
 import nodemailer from "nodemailer";
+
 import { getChannel } from "../config/rabbitmq.js";
+
 import { verificationEmailTemplate } from "../templates/verificationEmail.js";
 import { passwordResetEmailTemplate } from "../templates/passwordResetEmail.js";
+import { welcomeEmailTemplate } from "../templates/welcomeEmail.js";
 
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const transporter =
+  nodemailer.createTransport({
+    service: "gmail",
+
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  });
+
+const FROM =
+  `"Orivox" <${process.env.EMAIL_USER}>`;
+
+// ======================================================
+// EMAIL WORKER
+// ======================================================
 
 export const startEmailWorker = async () => {
   const channel = getChannel();
 
-  await channel.consume("email.verification", async (msg) => {
-    if (!msg) return;
-  
+  // ====================================================
+  // VERIFICATION EMAIL
+  // ====================================================
 
-    try {
-      const { email, token } = JSON.parse(msg.content.toString());
+  await channel.consume(
+    "email.verification",
+    async (msg) => {
+      if (!msg) return;
 
-      const verifyUrl =
-        `${process.env.BACKEND_URL}/api/v1/auth/verify-email?token=${token}`;
+      try {
+        const {
+          email,
+          token,
+        } = JSON.parse(
+          msg.content.toString()
+        );
 
-      await transporter.sendMail({
-        from: `"Orivox" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: "Verify your Orivox account",
-        html: verificationEmailTemplate({ verifyUrl }),
-      });
+        const verifyUrl =
+          `${process.env.BACKEND_URL}` +
+          `/api/v1/auth/verify-email?token=${token}`;
 
-      channel.ack(msg);
-    } catch (error) {
-      console.error("Verification email failed:", error.message);
-      channel.nack(msg, false, false);
+        await transporter.sendMail({
+          from: FROM,
+          to: email,
+          subject:
+            "Verify your Orivox account",
+          html:
+            verificationEmailTemplate({
+              verifyUrl,
+            }),
+        });
+
+        channel.ack(msg);
+      } catch (error) {
+        console.error(
+          "Verification email failed:",
+          error.message
+        );
+
+        channel.nack(
+          msg,
+          false,
+          false
+        );
+      }
     }
-  });
+  );
 
-  await channel.consume("password.reset", async (msg) => {
-    if (!msg) return;
+  // ====================================================
+  // PASSWORD RESET
+  // ====================================================
 
-    try {
-      const { email, token } = JSON.parse(msg.content.toString());
+  await channel.consume(
+    "password.reset",
+    async (msg) => {
+      if (!msg) return;
 
-      const resetUrl =
-        `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
+      try {
+        const {
+          email,
+          token,
+        } = JSON.parse(
+          msg.content.toString()
+        );
 
-      await transporter.sendMail({
-        from: `"Orivox" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: "Reset your Orivox password",
-        html: passwordResetEmailTemplate({ resetUrl }),
-      });
+        const resetUrl =
+          `${process.env.FRONTEND_URL}` +
+          `/reset-password?token=${token}`;
 
-      channel.ack(msg);
-    } catch (error) {
-      console.error("Password reset email failed:", error.message);
-      channel.nack(msg, false, false);
+        await transporter.sendMail({
+          from: FROM,
+          to: email,
+          subject:
+            "Reset your Orivox password",
+          html:
+            passwordResetEmailTemplate({
+              resetUrl,
+            }),
+        });
+
+        channel.ack(msg);
+      } catch (error) {
+        console.error(
+          "Password reset email failed:",
+          error.message
+        );
+
+        channel.nack(
+          msg,
+          false,
+          false
+        );
+      }
     }
-  });
+  );
 
-  
+  // ====================================================
+  // WELCOME EMAIL
+  // ====================================================
+
+  await channel.consume(
+    "email.welcome",
+    async (msg) => {
+      if (!msg) return;
+
+      try {
+        const {
+          email,
+          name,
+        } = JSON.parse(
+          msg.content.toString()
+        );
+
+        const appUrl =
+          `${process.env.FRONTEND_URL}/login`;
+
+        await transporter.sendMail({
+          from: FROM,
+          to: email,
+
+          subject:
+            "Welcome to Orivox ☁️",
+
+          html:
+            welcomeEmailTemplate({
+              name,
+              appUrl,
+            }),
+        });
+
+        channel.ack(msg);
+      } catch (error) {
+        console.error(
+          "Welcome email failed:",
+          error.message
+        );
+
+        channel.nack(
+          msg,
+          false,
+          false
+        );
+      }
+    }
+  );
 };
