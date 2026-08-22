@@ -3,10 +3,9 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
-  "postinstall": "prisma generate --schema=./prisma/schema.prisma",
+"scripts": {
   "dev": "nodemon src/server.js",
-  "start": "node src/server.js",
+"start": "npx prisma generate --schema=./prisma/schema.prisma && node src/server.js",
   "job:storage-deletion-recovery": "node src/jobs/storageDeletionRecovery.job.js",
   "job:upload-cleanup": "node src/jobs/uploadCleanup.job.js"
 },
